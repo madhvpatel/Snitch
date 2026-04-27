@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MapPin, ShieldCheck, ShieldAlert, Cpu, Hash, Clock, Navigation, Map } from 'lucide-react';
+import { MapPin, ShieldCheck, Hash, Clock, Navigation, Map } from 'lucide-react';
 
 const LocationPrompt = ({ locationData, proofHash, onConfirm, bestMatch, suggestions }) => {
     const [venueName, setVenueName] = useState('');
@@ -39,6 +39,11 @@ const LocationPrompt = ({ locationData, proofHash, onConfirm, bestMatch, suggest
                     <MapPin className="text-blue-500" size={24} />
                     Where are you right now?
                 </h2>
+                {bestMatch && (
+                    <p className="text-sm text-gray-400 mb-4">
+                        Best nearby match: <span className="text-blue-400 font-semibold">{bestMatch}</span>
+                    </p>
+                )}
 
                 {!showManual ? (
                     <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1 custom-scrollbar">
@@ -138,11 +143,11 @@ const LocationPrompt = ({ locationData, proofHash, onConfirm, bestMatch, suggest
             </div>
 
             <button
-                onClick={handleConfirm}
-                disabled={!venueName.trim()}
+                onClick={() => handleConfirm(bestMatch)}
+                disabled={!bestMatch}
                 className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all active:scale-95"
             >
-                Confirm & Sign Report
+                {bestMatch ? `Use ${bestMatch}` : 'Confirm & Sign Report'}
             </button>
         </div>
     );

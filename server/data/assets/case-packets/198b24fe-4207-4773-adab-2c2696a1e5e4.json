@@ -1,0 +1,123 @@
+[
+  {
+    "id": "152bfbcf-d548-4ef2-8b69-f59d5f935ddf",
+    "reference": "REP-D8529C",
+    "submissionId": "22a8f420-9ec2-4209-8a03-cdd2a591392c",
+    "venueId": "2255aef6-71e0-42bc-a84f-88c6536d0548",
+    "placeProviderId": null,
+    "matchedTrackId": null,
+    "matchedTrackConfidence": 0.25,
+    "rightsOwnerOrgId": null,
+    "rightsType": null,
+    "title": "Unknown Track",
+    "artist": "Unknown Artist",
+    "label": "Unknown Label",
+    "rightsOrg": null,
+    "forensicSummary": "*   Faint background music is discernibly audible, contributing to the overall venue ambience, though specific musical content is unclear.\n*   The audio characteristics strongly suggest room playback, recorded from a distance within the space.\n*   Subtle, distant crowd chatter and general ambient sounds are present throughout the recording, indicating human presence.\n*   The recording exhibits noticeable room ambience and some reverberation.\n\nConclusion: The audio portrays a general venue atmosphere with background music and crowd sounds, primarily captured as room playback.",
+    "deviceTrustBand": "high",
+    "analystStatus": "confirmed",
+    "exportStatus": "exported",
+    "createdAt": "2026-03-07T07:03:30.486Z",
+    "updatedAt": "2026-03-07T22:44:48.312Z",
+    "org": null,
+    "venue": {
+      "id": "2255aef6-71e0-42bc-a84f-88c6536d0548",
+      "placeProviderId": null,
+      "fallbackKey": "0883a89635d2",
+      "name": "Approx. Venue 19.224, 72.965",
+      "address": "19.2241,72.9653",
+      "city": null,
+      "latitude": 19.224114768159563,
+      "longitude": 72.96532185146035,
+      "createdAt": "2026-03-07T07:03:20.571Z",
+      "lastSeenAt": "2026-03-07T07:03:20.571Z"
+    },
+    "reviews": [
+      {
+        "id": "2a70fbee-b9f9-4ff1-9782-939911b9c047",
+        "reportId": "152bfbcf-d548-4ef2-8b69-f59d5f935ddf",
+        "reviewerId": "user_admin_demo",
+        "verdict": "needs_manual_venue_match",
+        "tags": [],
+        "notes": "",
+        "reviewedAt": "2026-03-07T22:44:45.732Z"
+      },
+      {
+        "id": "49d7b86b-8542-4dc5-8e5f-2c3cf1c0e7be",
+        "reportId": "152bfbcf-d548-4ef2-8b69-f59d5f935ddf",
+        "reviewerId": "user_admin_demo",
+        "verdict": "needs_manual_venue_match",
+        "tags": [],
+        "notes": "",
+        "reviewedAt": "2026-03-07T22:44:46.526Z"
+      },
+      {
+        "id": "62909394-2c56-4243-975a-b7f22d46889c",
+        "reportId": "152bfbcf-d548-4ef2-8b69-f59d5f935ddf",
+        "reviewerId": "user_admin_demo",
+        "verdict": "confirmed",
+        "tags": [
+          "ready-for-export"
+        ],
+        "notes": "",
+        "reviewedAt": "2026-03-07T22:44:48.312Z"
+      }
+    ],
+    "submission": {
+      "id": "22a8f420-9ec2-4209-8a03-cdd2a591392c",
+      "reference": "SUB-330FCE",
+      "captureSessionId": "0db7db02-f79a-4d03-9490-1d5b4a614183",
+      "installId": "f583342b-da94-406c-80a8-646ec7b85b9d",
+      "rawVideoAssetId": "0f889576-9d98-495a-be3d-7f3bd4d6f510",
+      "derivedAudioAssetId": "e9a90e0f-0ff6-48ca-a016-2517ce834b0a",
+      "mediaSha256": "694246ef047edccef3db42619d1badd789ecf13965647e976ff0889e75f5c6ff",
+      "durationSeconds": 16.3,
+      "geolocationStart": {
+        "lat": 19.224114768159563,
+        "lon": 72.96532185146035,
+        "accuracy": 38,
+        "altitude": 0,
+        "heading": null,
+        "speed": null,
+        "capturedAt": "2026-03-07T06:58:44.468Z"
+      },
+      "geolocationEnd": {
+        "lat": 19.224114768159563,
+        "lon": 72.96532185146035,
+        "accuracy": 38,
+        "altitude": 0,
+        "heading": null,
+        "speed": null,
+        "capturedAt": "2026-03-07T06:59:04.490Z"
+      },
+      "consentVersion": "2026-03-07",
+      "status": "ready",
+      "uploadToken": "ddead85294264efd11510488d37b6a57",
+      "mimeType": "video/webm;codecs=vp9,opus",
+      "fileName": "snitch-1772866724481.webm",
+      "createdAt": "2026-03-07T06:58:44.483Z",
+      "reportIds": [
+        "152bfbcf-d548-4ef2-8b69-f59d5f935ddf"
+      ],
+      "hasValidSignature": true,
+      "uploadedMimeType": "video/webm",
+      "localStartTime": "2026-03-07T06:58:44.474Z",
+      "localEndTime": "2026-03-07T06:59:04.486Z",
+      "measuredStartOffsetMs": 1,
+      "measuredEndOffsetMs": -3,
+      "clockSkewFlag": false,
+      "finalizedAt": "2026-03-07T06:59:04.542Z",
+      "processingStartedAt": "2026-03-07T07:03:11.598Z",
+      "processingError": null,
+      "processingCompletedAt": "2026-03-07T07:03:30.486Z",
+      "songIdentity": null,
+      "venueId": "2255aef6-71e0-42bc-a84f-88c6536d0548",
+      "rawVideoUrl": "http://127.0.0.1:3001/media/raw-video/0f889576-9d98-495a-be3d-7f3bd4d6f510.webm",
+      "derivedAudioUrl": "http://127.0.0.1:3001/media/derived-audio/e9a90e0f-0ff6-48ca-a016-2517ce834b0a.wav"
+    },
+    "venueHistory": {
+      "reports30Days": 1,
+      "reports90Days": 1
+    }
+  }
+]

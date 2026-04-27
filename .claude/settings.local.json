@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /Users/madhavpatel/Snitch_1/src/components/*.jsx)",
+      "Bash(wc -l /Users/madhavpatel/Snitch_1/src/pages/*.jsx)",
+      "Bash(wc -l /Users/madhavpatel/Snitch_1/src/services/*.js)",
+      "Bash(ls -la /Users/madhavpatel/Snitch_1/server/*.js)",
+      "Bash(grep -E \"\\\\.\\(py|txt|json\\)$\")"
+    ]
+  }
+}

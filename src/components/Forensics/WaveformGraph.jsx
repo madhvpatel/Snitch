@@ -6,20 +6,15 @@ import { formatTime } from '../../services/audioUtils';
 export const WaveformGraph = ({
     data,
     currentTime1,
-    currentTime2,
     onSeek,
     duration,
-    originalPeakRegion,
-    isolatedPeakRegion
+    originalPeakRegion
 }) => {
     const [domain, setDomain] = useState([0, duration]);
     const [showOriginal, setShowOriginal] = useState(true);
-    const [showIsolated, setShowIsolated] = useState(true);
-
     const [showVocals, setShowVocals] = useState(true);
     const [showDrums, setShowDrums] = useState(true);
     const [showBass, setShowBass] = useState(true);
-    const [showOther, setShowOther] = useState(true);
 
     // Reset domain when duration changes (e.g. new file load)
     useEffect(() => {

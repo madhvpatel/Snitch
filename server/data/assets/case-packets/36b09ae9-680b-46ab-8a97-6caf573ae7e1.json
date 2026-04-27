@@ -1,0 +1,1075 @@
+{
+  "casePacketVersion": "case-packet-v2",
+  "exportedAt": "2026-04-03T09:47:38.535Z",
+  "exportedBy": {
+    "userId": "user_admin_demo",
+    "orgId": "org_platform_admin"
+  },
+  "reportCount": 1,
+  "reports": [
+    {
+      "id": "17091e20-d2ba-4bed-9e4c-fc292ecce198",
+      "reference": "REP-484E3F",
+      "submissionId": "3eb7b705-2a68-4fe7-8917-89fc00003cb3",
+      "venueId": "14719683-c4cc-4b94-bc9e-b30e4726c7f0",
+      "placeProviderId": "ChIJORecxXG55zsRi0eQvt4yxSc",
+      "matchedTrackId": null,
+      "matchedTrackConfidence": 0.25,
+      "rightsOwnerOrgId": null,
+      "rightsType": null,
+      "title": "I Can't Help Myself (Sugar Pie Honey Bunch)",
+      "artist": "Original Motion Picture Soundtrack",
+      "label": "Universal Strategic Marketing",
+      "rightsOrg": "BMI",
+      "forensicSummary": "*   **Visual Frame:** The scene depicts an indoor setting, possibly a cafe or restaurant, with a person visible and two art pieces on the wall. No visible speakers, DJ booth, or staging are apparent.\n*   **Music:** Faint background music is audible, present at a very low level, not a primary focus of the audio.\n*   **Audio Source:** The music sounds like casual room playback, mixed with live conversations rather than a direct feed.\n*   **Crowd/Ambience:** Human speech and conversation are clearly dominant, indicating an active social environment.\n*   **Audio Quality:** The recording presents clear dialogue with some typical indoor ambience, but no significant clipping or strong reverberation.\n\nConclusion: Ambient background music from room playback mixed with dominant conversation in an indoor setting.",
+      "sourceAnalysis": {
+        "sourceClass": "likely_pa_system",
+        "confidence": 0.85,
+        "score": 100,
+        "signals": {
+          "subToMidRatio": 0.479,
+          "bassToMidRatio": 2.019,
+          "lowMidToMidRatio": 1.853,
+          "presenceToMidRatio": 0.349,
+          "highToMidRatio": 0.108,
+          "bandCoverageRatio": 0.643,
+          "ambientContinuity": 0.806,
+          "silenceRatio": 0.311,
+          "dynamicRange": 2.331,
+          "crestFactor": 6.064,
+          "overallRms": 0.03,
+          "peakOverallRms": 0.0373,
+          "windowCount": 69,
+          "windowEnergyContinuity": 0.806,
+          "windowEnergyCv": 0.155,
+          "windowEnergySlope": -0.193,
+          "lowMidWindowContinuity": 0.621,
+          "lowMidWindowCv": 0.278,
+          "lowMidEnergySlope": -0.151,
+          "bandCoverageMedian": 0.643,
+          "bandCoverageP90": 0.643,
+          "medianWindowAmbientContinuity": 0.524,
+          "peakAmbientContinuity": 0.546,
+          "peakBandCoverageRatio": 0.607,
+          "nearFieldBloomSuspicion": 0,
+          "analysisWindowStartSeconds": 10,
+          "analysisWindowDurationSeconds": 3
+        },
+        "explanation": [
+          "Low-mid continuity through roughly 160–315 Hz is preserved, which is more consistent with fuller playback systems.",
+          "Sub-bass remains present relative to the mid-band, which supports larger playback hardware more than phone playback.",
+          "Energy is distributed across a broader third-octave span, which is less typical of tiny built-in speakers.",
+          "Cross-window energy stays comparatively stable across the clip, which is more consistent with installed playback than with a nearby handheld device.",
+          "Window-to-window variance remains controlled, which supports a stable playback source.",
+          "Experimental FFT source score: 100/100 (likely pa system)."
+        ],
+        "modelVersion": "source-v2-fft",
+        "classifierMode": "source-v2-fft"
+      },
+      "visualAnalysis": {
+        "playbackContext": "inconclusive",
+        "confidence": 0.9,
+        "summary": "The frames capture the interior of 'Bean Theory Coffee', a cafe featuring tables, chairs, and patrons. While music energy was noted as high during these timestamps and an audio classifier indicated a high likelihood of a PA system, no specific audio playback equipment such as installed speakers, a DJ booth, mixer, or stage setup is clearly visible in any of the frames. A laptop is present on a table in Frame 2, and a patron is seen wearing earbuds, but neither is clearly demonstrated as the source for venue-wide music playback. Due to significant motion blur in some frames and the lack of clear visual evidence for any specific venue-scale audio source, the playback context is inconclusive based solely on the visual information.",
+        "visibleEquipment": [
+          "tables",
+          "chairs",
+          "art on wall",
+          "AC unit (Frame 2)",
+          "laptop (Frame 2)",
+          "earbuds (Frame 2)"
+        ],
+        "venueIdentitySignals": [
+          "signage 'BEAN THEORY COFFEE' (Frame 2, 3)",
+          "tables",
+          "chairs",
+          "patrons",
+          "cafe decor/art"
+        ],
+        "obstructionFlags": [
+          "motion blur (Frame 1, 3)",
+          "limited camera angle (floor-focused)",
+          "partial obstruction by people/furniture"
+        ],
+        "frameObservations": [
+          {
+            "timestampSeconds": 4.6,
+            "observation": "The frame shows a blurry view of a cafe interior with tables, chairs, and two art pieces on the wall. A person is partially visible on the right. No audio playback equipment is visible. Significant motion blur affects the clarity of the image."
+          },
+          {
+            "timestampSeconds": 10.6,
+            "observation": "This frame provides a clearer view of 'Bean Theory Coffee', with the venue's sign visible in the background. Multiple patrons are seated at tables. An AC unit is mounted on the wall. A person with a laptop is visible, and another has earbuds, but no venue-wide playback equipment is apparent."
+          },
+          {
+            "timestampSeconds": 17.44,
+            "observation": "The frame again shows the interior of 'Bean Theory Coffee' with its sign clearly visible on the back wall. Tables and chairs are prominent in the foreground. The image has some motion blur, but the cafe environment is clear. No audio playback equipment is visible."
+          }
+        ],
+        "modelVersion": "visual-v1",
+        "peakWindows": [
+          {
+            "rank": 1,
+            "startSeconds": 4.2,
+            "endSeconds": 5,
+            "timestampSeconds": 4.6,
+            "rms": 0.0417,
+            "relativeIntensity": 1.42,
+            "clipDurationSeconds": 19.97
+          },
+          {
+            "rank": 2,
+            "startSeconds": 10.2,
+            "endSeconds": 11,
+            "timestampSeconds": 10.6,
+            "rms": 0.0446,
+            "relativeIntensity": 1.53,
+            "clipDurationSeconds": 19.97
+          },
+          {
+            "rank": 3,
+            "startSeconds": 17.04,
+            "endSeconds": 17.84,
+            "timestampSeconds": 17.44,
+            "rms": 0.0394,
+            "relativeIntensity": 1.35,
+            "clipDurationSeconds": 19.97
+          }
+        ]
+      },
+      "applicationAssessment": {
+        "locationContext": "private_home",
+        "confidence": 0.5800000000000001,
+        "venueAttributionRisk": 0.3599999999999999,
+        "privateSpaceRisk": 0.6,
+        "replayRisk": 0.48,
+        "outletAmbiguityRisk": 0.04,
+        "farmingRisk": 0.92,
+        "attackReadiness": 0.18919999999999992,
+        "recommendedDisposition": "do_not_pursue",
+        "reasons": [
+          "Matched venue delta: start 31 m / end 31 m.",
+          "Capture path moved 0 m between start and end.",
+          "Selected vs matched venue anchors are 0 m apart.",
+          "Selected venue and matched venue names align.",
+          "Narrative cues suggest crowd or public-space ambience.",
+          "Visual layer surfaced 11 venue/equipment cue(s)."
+        ],
+        "evidenceGaps": [],
+        "edgeCaseTags": [
+          "screen_replay",
+          "home_recording",
+          "farming_risk"
+        ],
+        "signalSummary": {
+          "geoDistanceMeters": 31,
+          "averageAccuracyMeters": 34.065865595771086,
+          "geoBucket": "inside",
+          "primaryVenueSource": "matched_venue",
+          "capturePathDeltaMeters": 0,
+          "venueAnchorDeltaMeters": 0,
+          "withinAccuracyEnvelope": true,
+          "matchedVenueDistanceStartMeters": 31,
+          "matchedVenueDistanceEndMeters": 31,
+          "selectedVenueDistanceStartMeters": 31,
+          "selectedVenueDistanceEndMeters": 31,
+          "selectedMatchedAligned": true,
+          "venueCueCount": 11,
+          "wifiConnected": false,
+          "sourceClass": "likely_pa_system",
+          "visualPlaybackContext": "inconclusive",
+          "sameInstallRecentReports30d": 11,
+          "sameInstallWeakReports30d": 11,
+          "sameInstallDistinctVenues30d": 6
+        },
+        "modelVersion": "application-v1-fallback"
+      },
+      "deviceTrustBand": "low",
+      "merchantMasterId": "0611e9ab-d0f8-4a8c-95db-5fcd0e68e622",
+      "caseId": "fb407918-3dcd-4c15-8f70-d3c08283a1a6",
+      "rewardEligibility": false,
+      "rewardDisposition": "not_reward_eligible",
+      "estimatedRecoverableValueInr": 15000,
+      "licenseAssessment": {
+        "status": "unknown",
+        "source": "unmatched-venue-or-org",
+        "validFrom": null,
+        "validTo": null,
+        "lastVerifiedAt": null
+      },
+      "analystStatus": "unreviewed",
+      "exportStatus": "not_exported",
+      "createdAt": "2026-04-03T08:32:04.181Z",
+      "updatedAt": "2026-04-03T08:32:04.181Z",
+      "org": null,
+      "venue": {
+        "id": "14719683-c4cc-4b94-bc9e-b30e4726c7f0",
+        "placeProviderId": "ChIJORecxXG55zsRi0eQvt4yxSc",
+        "placeProvider": "google_maps",
+        "fallbackKey": "040080336ce4",
+        "name": "Bean Theory Coffee",
+        "address": "Shop 12, Block 3, HIRANANDANI MEADOWS, Emerald Plaza, Manpada, Thane West, Thane, Maharashtra 400607, India",
+        "city": "Thane",
+        "latitude": 19.2275037,
+        "longitude": 72.9704647,
+        "createdAt": "2026-04-03T08:31:33.683Z",
+        "lastSeenAt": "2026-04-03T08:31:33.683Z"
+      },
+      "merchant": {
+        "id": "0611e9ab-d0f8-4a8c-95db-5fcd0e68e622",
+        "venueId": "14719683-c4cc-4b94-bc9e-b30e4726c7f0",
+        "placeProviderId": "ChIJORecxXG55zsRi0eQvt4yxSc",
+        "venueName": "Bean Theory Coffee",
+        "address": "Shop 12, Block 3, HIRANANDANI MEADOWS, Emerald Plaza, Manpada, Thane West, Thane, Maharashtra 400607, India",
+        "city": "Thane",
+        "legalEntityName": null,
+        "gstin": null,
+        "cityTier": "tier_2",
+        "venueType": "small_cafe_qsr",
+        "hotelStarClass": null,
+        "outletCount": 1,
+        "eventCapability": "standard",
+        "rightsLayersApplicable": [
+          "label",
+          "collective"
+        ],
+        "createdAt": "2026-04-03T08:32:04.181Z",
+        "updatedAt": "2026-04-03T08:32:04.181Z"
+      },
+      "case": {
+        "id": "fb407918-3dcd-4c15-8f70-d3c08283a1a6",
+        "reference": "CASE-2CB969",
+        "venueId": "14719683-c4cc-4b94-bc9e-b30e4726c7f0",
+        "rightsOwnerOrgId": null,
+        "rightsType": null,
+        "primaryContributorId": null,
+        "primaryInstallId": "c5fd6571-69ad-48b0-ad28-1e9e58496cac",
+        "primaryReportId": "17091e20-d2ba-4bed-9e4c-fc292ecce198",
+        "primarySubmissionId": "3eb7b705-2a68-4fe7-8917-89fc00003cb3",
+        "reportIds": [
+          "17091e20-d2ba-4bed-9e4c-fc292ecce198"
+        ],
+        "corroborationReportIds": [],
+        "evidenceCount": 1,
+        "merchantMasterId": "0611e9ab-d0f8-4a8c-95db-5fcd0e68e622",
+        "licenseStatus": "unknown",
+        "licenseSource": "unmatched-venue-or-org",
+        "rewardEligible": false,
+        "caseStatus": "pending_license_verification",
+        "planningBand": "Small cafe or QSR",
+        "estimatedRecoverableValueInr": 15000,
+        "realizedValueInr": 0,
+        "settlementSignedAt": null,
+        "outcomeType": null,
+        "tariffIds": [],
+        "collectionProbability": 0.25,
+        "nonComplianceMultiplier": 1,
+        "createdAt": "2026-04-03T08:32:04.181Z",
+        "updatedAt": "2026-04-03T08:32:04.181Z",
+        "merchant": {
+          "id": "0611e9ab-d0f8-4a8c-95db-5fcd0e68e622",
+          "venueId": "14719683-c4cc-4b94-bc9e-b30e4726c7f0",
+          "placeProviderId": "ChIJORecxXG55zsRi0eQvt4yxSc",
+          "venueName": "Bean Theory Coffee",
+          "address": "Shop 12, Block 3, HIRANANDANI MEADOWS, Emerald Plaza, Manpada, Thane West, Thane, Maharashtra 400607, India",
+          "city": "Thane",
+          "legalEntityName": null,
+          "gstin": null,
+          "cityTier": "tier_2",
+          "venueType": "small_cafe_qsr",
+          "hotelStarClass": null,
+          "outletCount": 1,
+          "eventCapability": "standard",
+          "rightsLayersApplicable": [
+            "label",
+            "collective"
+          ],
+          "createdAt": "2026-04-03T08:32:04.181Z",
+          "updatedAt": "2026-04-03T08:32:04.181Z"
+        },
+        "contributor": null,
+        "rewardSummary": {
+          "heldAmountInr": 0,
+          "paidAmountInr": 0,
+          "reversedAmountInr": 0
+        },
+        "rewards": []
+      },
+      "reviews": [],
+      "sourceReviews": [],
+      "evidencePackage": {
+        "packageVersion": "evidence-package-v2",
+        "captureIntegrity": {
+          "submissionReference": "SC-2A450C",
+          "captureSessionId": "e5eef782-0738-4696-8fb5-77fe7b1afe03",
+          "originSurface": "snitchv1_mobile_pilot",
+          "consentVersion": "snitchv1-mobile",
+          "durationSeconds": 20,
+          "mediaSha256": "ef98cc7ba2fdef217ed7e1b2a694365599538fc0455a65f315e54f1a5dd2179c",
+          "signatureStatus": "unsigned_or_unverified",
+          "clockSkewStatus": "clear",
+          "measuredOffsetsMs": {
+            "start": 0,
+            "end": 0
+          },
+          "timestamps": {
+            "localStartTime": "2026-04-03T08:30:05.288Z",
+            "localEndTime": "2026-04-03T08:30:25.453Z",
+            "finalizedAt": "2026-04-03T08:31:16.844Z",
+            "processingStartedAt": "2026-04-03T08:31:17.052Z",
+            "processingCompletedAt": "2026-04-03T08:32:07.451Z"
+          },
+          "device": {
+            "model": "ios",
+            "osVersion": "ios 18.6.2",
+            "appVersion": "1.0.0",
+            "deviceTrustBand": "low"
+          },
+          "geolocation": {
+            "start": {
+              "lat": 19.227230636892862,
+              "lon": 72.97053152026295,
+              "accuracy": 34.106950708874805,
+              "capturedAt": "2026-04-03T08:30:05.288Z"
+            },
+            "end": {
+              "lat": 19.227230634244314,
+              "lon": 72.9705315187595,
+              "accuracy": 34.024780482667374,
+              "capturedAt": "2026-04-03T08:30:25.453Z"
+            }
+          },
+          "assets": {
+            "rawVideo": {
+              "assetId": "5b855b80-0f13-414f-be47-1f04783e95e3",
+              "mimeType": "video/quicktime",
+              "sizeBytes": 19345555,
+              "url": "http://127.0.0.1:3001/media/raw-video/5b855b80-0f13-414f-be47-1f04783e95e3.mov"
+            },
+            "derivedAudio": {
+              "assetId": "4cf7a19c-feb8-4c08-ac06-51c7a7b27870",
+              "mimeType": "audio/wav",
+              "sizeBytes": 1761230,
+              "url": "http://127.0.0.1:3001/media/derived-audio/4cf7a19c-feb8-4c08-ac06-51c7a7b27870.wav"
+            }
+          }
+        },
+        "radioContext": {
+          "collectionVersion": "radio-evidence-v1",
+          "limitations": [
+            "Wi-Fi evidence is current-network context only in this build.",
+            "Nearby BLE scanning only captures BLE advertising devices, not classic Bluetooth audio hardware."
+          ],
+          "wifi": {
+            "status": "captured",
+            "captureMode": "current_network_context_only",
+            "supportLevel": "current_connection_only",
+            "supportsNearbyScan": false,
+            "capturedAt": "2026-04-03T08:30:25.456Z",
+            "platform": "ios",
+            "executionEnvironment": "storeClient",
+            "observedTransportType": "wifi",
+            "isConnected": true,
+            "isInternetReachable": true,
+            "isConnectionExpensive": false,
+            "ssid": null,
+            "bssid": null,
+            "strength": 0,
+            "frequency": 0,
+            "deviceCount": 0,
+            "devices": [],
+            "note": "This build captures current network context, not a nearby Wi-Fi scan. SSID and BSSID are only attempted in a native development or release build.",
+            "summary": "Connected context captured"
+          },
+          "bluetooth": {
+            "status": "unsupported",
+            "captureMode": "nearby_ble_scan",
+            "supportLevel": "requires_native_dev_or_release_build",
+            "supportsNearbyScan": false,
+            "capturedAt": "2026-04-03T08:30:25.456Z",
+            "platform": "ios",
+            "executionEnvironment": "storeClient",
+            "observedTransportType": "wifi",
+            "isConnected": true,
+            "isInternetReachable": true,
+            "isConnectionExpensive": null,
+            "ssid": null,
+            "bssid": null,
+            "strength": 0,
+            "frequency": 0,
+            "deviceCount": 0,
+            "devices": [],
+            "note": "Nearby BLE scanning is not active in Expo Go. Use a native development build or release build. Nearby BLE scanning is limited to BLE advertising devices and does not detect classic Bluetooth audio hardware. This capture ran in Expo Go, so nearby BLE scanning was not available.",
+            "summary": "Nearby BLE scanning is not active in Expo Go. Use a native development build or release build. Nearby BLE scanning is limited to BLE advertising devices and does not detect classic Bluetooth audio hardware. This capture ran in Expo Go, so nearby BLE scanning was not available."
+          }
+        },
+        "audioIdentification": {
+          "provider": "ACRCloud",
+          "matchedSong": "I Can't Help Myself (Sugar Pie Honey Bunch) - Original Motion Picture Soundtrack",
+          "title": "I Can't Help Myself (Sugar Pie Honey Bunch)",
+          "artist": "Original Motion Picture Soundtrack",
+          "label": "Universal Strategic Marketing",
+          "album": "Forrest Gump - The Soundtrack",
+          "releaseDate": "2011-01-13",
+          "isrc": "USLIC0601850",
+          "upc": "00602537997374",
+          "matchedTrackId": null,
+          "matchedTrackConfidence": 0.25
+        },
+        "sourceAssessment": {
+          "sourceClass": "likely_pa_system",
+          "confidence": 0.85,
+          "score": 100,
+          "signals": {
+            "subToMidRatio": 0.479,
+            "bassToMidRatio": 2.019,
+            "lowMidToMidRatio": 1.853,
+            "presenceToMidRatio": 0.349,
+            "highToMidRatio": 0.108,
+            "bandCoverageRatio": 0.643,
+            "ambientContinuity": 0.806,
+            "silenceRatio": 0.311,
+            "dynamicRange": 2.331,
+            "crestFactor": 6.064,
+            "overallRms": 0.03,
+            "peakOverallRms": 0.0373,
+            "windowCount": 69,
+            "windowEnergyContinuity": 0.806,
+            "windowEnergyCv": 0.155,
+            "windowEnergySlope": -0.193,
+            "lowMidWindowContinuity": 0.621,
+            "lowMidWindowCv": 0.278,
+            "lowMidEnergySlope": -0.151,
+            "bandCoverageMedian": 0.643,
+            "bandCoverageP90": 0.643,
+            "medianWindowAmbientContinuity": 0.524,
+            "peakAmbientContinuity": 0.546,
+            "peakBandCoverageRatio": 0.607,
+            "nearFieldBloomSuspicion": 0,
+            "analysisWindowStartSeconds": 10,
+            "analysisWindowDurationSeconds": 3
+          },
+          "explanation": [
+            "Low-mid continuity through roughly 160–315 Hz is preserved, which is more consistent with fuller playback systems.",
+            "Sub-bass remains present relative to the mid-band, which supports larger playback hardware more than phone playback.",
+            "Energy is distributed across a broader third-octave span, which is less typical of tiny built-in speakers.",
+            "Cross-window energy stays comparatively stable across the clip, which is more consistent with installed playback than with a nearby handheld device.",
+            "Window-to-window variance remains controlled, which supports a stable playback source.",
+            "Experimental FFT source score: 100/100 (likely pa system)."
+          ],
+          "modelVersion": "source-v2-fft",
+          "classifierMode": "source-v2-fft",
+          "requestedMode": "source-v2-fft",
+          "analystNote": "Low-mid continuity through roughly 160–315 Hz is preserved, which is more consistent with fuller playback systems.",
+          "reviewedSource": null
+        },
+        "visualContext": {
+          "playbackContext": "inconclusive",
+          "confidence": 0.9,
+          "summary": "The frames capture the interior of 'Bean Theory Coffee', a cafe featuring tables, chairs, and patrons. While music energy was noted as high during these timestamps and an audio classifier indicated a high likelihood of a PA system, no specific audio playback equipment such as installed speakers, a DJ booth, mixer, or stage setup is clearly visible in any of the frames. A laptop is present on a table in Frame 2, and a patron is seen wearing earbuds, but neither is clearly demonstrated as the source for venue-wide music playback. Due to significant motion blur in some frames and the lack of clear visual evidence for any specific venue-scale audio source, the playback context is inconclusive based solely on the visual information.",
+          "visibleEquipment": [
+            "tables",
+            "chairs",
+            "art on wall",
+            "AC unit (Frame 2)",
+            "laptop (Frame 2)",
+            "earbuds (Frame 2)"
+          ],
+          "venueIdentitySignals": [
+            "signage 'BEAN THEORY COFFEE' (Frame 2, 3)",
+            "tables",
+            "chairs",
+            "patrons",
+            "cafe decor/art"
+          ],
+          "obstructionFlags": [
+            "motion blur (Frame 1, 3)",
+            "limited camera angle (floor-focused)",
+            "partial obstruction by people/furniture"
+          ],
+          "frameObservations": [
+            {
+              "timestampSeconds": 4.6,
+              "observation": "The frame shows a blurry view of a cafe interior with tables, chairs, and two art pieces on the wall. A person is partially visible on the right. No audio playback equipment is visible. Significant motion blur affects the clarity of the image."
+            },
+            {
+              "timestampSeconds": 10.6,
+              "observation": "This frame provides a clearer view of 'Bean Theory Coffee', with the venue's sign visible in the background. Multiple patrons are seated at tables. An AC unit is mounted on the wall. A person with a laptop is visible, and another has earbuds, but no venue-wide playback equipment is apparent."
+            },
+            {
+              "timestampSeconds": 17.44,
+              "observation": "The frame again shows the interior of 'Bean Theory Coffee' with its sign clearly visible on the back wall. Tables and chairs are prominent in the foreground. The image has some motion blur, but the cafe environment is clear. No audio playback equipment is visible."
+            }
+          ],
+          "modelVersion": "visual-v1",
+          "peakWindows": [
+            {
+              "rank": 1,
+              "startSeconds": 4.2,
+              "endSeconds": 5,
+              "timestampSeconds": 4.6,
+              "rms": 0.0417,
+              "relativeIntensity": 1.42,
+              "clipDurationSeconds": 19.97
+            },
+            {
+              "rank": 2,
+              "startSeconds": 10.2,
+              "endSeconds": 11,
+              "timestampSeconds": 10.6,
+              "rms": 0.0446,
+              "relativeIntensity": 1.53,
+              "clipDurationSeconds": 19.97
+            },
+            {
+              "rank": 3,
+              "startSeconds": 17.04,
+              "endSeconds": 17.84,
+              "timestampSeconds": 17.44,
+              "rms": 0.0394,
+              "relativeIntensity": 1.35,
+              "clipDurationSeconds": 19.97
+            }
+          ],
+          "frames": [
+            {
+              "assetId": "9430c6b3-2793-4d5e-936e-4a6618fc206c",
+              "timestampSeconds": 4.6,
+              "peakRank": 1,
+              "relativeIntensity": 1.42,
+              "mimeType": "image/jpeg",
+              "url": "http://127.0.0.1:3001/media/video-frame/9430c6b3-2793-4d5e-936e-4a6618fc206c.jpg"
+            },
+            {
+              "assetId": "6ec69910-ac45-4a25-96e1-47c554a1833f",
+              "timestampSeconds": 10.6,
+              "peakRank": 2,
+              "relativeIntensity": 1.53,
+              "mimeType": "image/jpeg",
+              "url": "http://127.0.0.1:3001/media/video-frame/6ec69910-ac45-4a25-96e1-47c554a1833f.jpg"
+            },
+            {
+              "assetId": "058b91ce-3793-439f-96d4-2e0a1a0ceb82",
+              "timestampSeconds": 17.44,
+              "peakRank": 3,
+              "relativeIntensity": 1.35,
+              "mimeType": "image/jpeg",
+              "url": "http://127.0.0.1:3001/media/video-frame/058b91ce-3793-439f-96d4-2e0a1a0ceb82.jpg"
+            }
+          ]
+        },
+        "locationDelta": {
+          "selectedVenueDistanceStartMeters": 31,
+          "selectedVenueDistanceEndMeters": 31,
+          "matchedVenueDistanceStartMeters": 31,
+          "matchedVenueDistanceEndMeters": 31,
+          "minVenueDistanceMeters": 31,
+          "maxVenueDistanceMeters": 31,
+          "avgVenueDistanceMeters": 31,
+          "capturePathDeltaMeters": 0,
+          "venueAnchorDeltaMeters": 0,
+          "accuracyStartMeters": 34.106950708874805,
+          "accuracyEndMeters": 34.024780482667374,
+          "averageAccuracyMeters": 34.065865595771086,
+          "accuracyEnvelopeMeters": 43,
+          "withinAccuracyEnvelope": true,
+          "geoBucket": "inside",
+          "selectedMatchedAligned": true,
+          "primaryVenueSource": "matched_venue"
+        },
+        "applicationLayer": {
+          "locationContext": "private_home",
+          "confidence": 0.5800000000000001,
+          "venueAttributionRisk": 0.3599999999999999,
+          "privateSpaceRisk": 0.6,
+          "replayRisk": 0.48,
+          "outletAmbiguityRisk": 0.04,
+          "farmingRisk": 0.92,
+          "attackReadiness": 0.18919999999999992,
+          "recommendedDisposition": "do_not_pursue",
+          "reasons": [
+            "Matched venue delta: start 31 m / end 31 m.",
+            "Capture path moved 0 m between start and end.",
+            "Selected vs matched venue anchors are 0 m apart.",
+            "Selected venue and matched venue names align.",
+            "Narrative cues suggest crowd or public-space ambience.",
+            "Visual layer surfaced 11 venue/equipment cue(s)."
+          ],
+          "evidenceGaps": [],
+          "edgeCaseTags": [
+            "screen_replay",
+            "home_recording",
+            "farming_risk"
+          ],
+          "signalSummary": {
+            "geoDistanceMeters": 31,
+            "averageAccuracyMeters": 34.065865595771086,
+            "geoBucket": "inside",
+            "primaryVenueSource": "matched_venue",
+            "capturePathDeltaMeters": 0,
+            "venueAnchorDeltaMeters": 0,
+            "withinAccuracyEnvelope": true,
+            "matchedVenueDistanceStartMeters": 31,
+            "matchedVenueDistanceEndMeters": 31,
+            "selectedVenueDistanceStartMeters": 31,
+            "selectedVenueDistanceEndMeters": 31,
+            "selectedMatchedAligned": true,
+            "venueCueCount": 11,
+            "wifiConnected": false,
+            "sourceClass": "likely_pa_system",
+            "visualPlaybackContext": "inconclusive",
+            "sameInstallRecentReports30d": 11,
+            "sameInstallWeakReports30d": 11,
+            "sameInstallDistinctVenues30d": 6
+          },
+          "modelVersion": "application-v1-fallback"
+        },
+        "venueContext": {
+          "selectedVenue": {
+            "placeProviderId": "ChIJORecxXG55zsRi0eQvt4yxSc",
+            "provider": "google_maps",
+            "name": "Bean Theory Coffee",
+            "address": "Shop 12, Block 3, HIRANANDANI MEADOWS, Emerald Plaza, Manpada, Thane West, Thane, Maharashtra 400607, India",
+            "city": "Thane",
+            "latitude": 19.2275037,
+            "longitude": 72.9704647
+          },
+          "matchedVenue": {
+            "id": "14719683-c4cc-4b94-bc9e-b30e4726c7f0",
+            "name": "Bean Theory Coffee",
+            "address": "Shop 12, Block 3, HIRANANDANI MEADOWS, Emerald Plaza, Manpada, Thane West, Thane, Maharashtra 400607, India",
+            "city": "Thane",
+            "latitude": 19.2275037,
+            "longitude": 72.9704647,
+            "placeProviderId": "ChIJORecxXG55zsRi0eQvt4yxSc",
+            "placeProvider": "google_maps"
+          },
+          "merchant": {
+            "id": "0611e9ab-d0f8-4a8c-95db-5fcd0e68e622",
+            "venueName": "Bean Theory Coffee",
+            "legalEntityName": null,
+            "gstin": null,
+            "cityTier": "tier_2",
+            "venueType": "small_cafe_qsr",
+            "outletCount": 1,
+            "eventCapability": "standard"
+          },
+          "venueHistory": {
+            "reports30Days": 1,
+            "reports90Days": 1,
+            "totalReportsAtVenue": 1
+          }
+        },
+        "rightsAndCaseContext": {
+          "org": null,
+          "rightsType": null,
+          "rightsOrg": "BMI",
+          "licenseAssessment": {
+            "status": "unknown",
+            "source": "unmatched-venue-or-org",
+            "validFrom": null,
+            "validTo": null,
+            "lastVerifiedAt": null
+          },
+          "analystStatus": "unreviewed",
+          "estimatedRecoverableValueInr": 15000,
+          "rewardEligibility": false,
+          "rewardDisposition": "not_reward_eligible",
+          "case": {
+            "id": "fb407918-3dcd-4c15-8f70-d3c08283a1a6",
+            "reference": "CASE-2CB969",
+            "caseStatus": "pending_license_verification",
+            "licenseStatus": "unknown",
+            "evidenceCount": 1,
+            "planningBand": "Small cafe or QSR"
+          }
+        },
+        "contributorContext": null,
+        "reviewTrail": {
+          "analystReviews": [],
+          "sourceReviews": []
+        }
+      },
+      "submission": {
+        "id": "3eb7b705-2a68-4fe7-8917-89fc00003cb3",
+        "reference": "SC-2A450C",
+        "captureSessionId": "e5eef782-0738-4696-8fb5-77fe7b1afe03",
+        "installId": "c5fd6571-69ad-48b0-ad28-1e9e58496cac",
+        "mobileUserId": "mobile_bc45b056-f729-463f-955d-448751442315",
+        "rawVideoAssetId": "5b855b80-0f13-414f-be47-1f04783e95e3",
+        "derivedAudioAssetId": "4cf7a19c-feb8-4c08-ac06-51c7a7b27870",
+        "mediaSha256": "ef98cc7ba2fdef217ed7e1b2a694365599538fc0455a65f315e54f1a5dd2179c",
+        "durationSeconds": 20,
+        "geolocationStart": {
+          "lat": 19.227230636892862,
+          "lon": 72.97053152026295,
+          "accuracy": 34.106950708874805,
+          "capturedAt": "2026-04-03T08:30:05.288Z"
+        },
+        "geolocationEnd": {
+          "lat": 19.227230634244314,
+          "lon": 72.9705315187595,
+          "accuracy": 34.024780482667374,
+          "capturedAt": "2026-04-03T08:30:25.453Z"
+        },
+        "radioEvidence": {
+          "collectionVersion": "radio-evidence-v1",
+          "start": {
+            "phase": "start",
+            "capturedAt": "2026-04-03T08:29:54.186Z",
+            "wifi": {
+              "status": "captured",
+              "captureMode": "current_network_context_only",
+              "supportLevel": "current_connection_only",
+              "supportsNearbyScan": false,
+              "capturedAt": "2026-04-03T08:29:54.186Z",
+              "platform": "ios",
+              "executionEnvironment": "storeClient",
+              "observedTransportType": "wifi",
+              "isConnected": true,
+              "isInternetReachable": null,
+              "isConnectionExpensive": false,
+              "ssid": null,
+              "bssid": null,
+              "strength": 0,
+              "frequency": 0,
+              "deviceCount": 0,
+              "devices": [],
+              "note": "This build captures current network context, not a nearby Wi-Fi scan. SSID and BSSID are only attempted in a native development or release build."
+            },
+            "bluetooth": {
+              "status": "unsupported",
+              "captureMode": "nearby_ble_scan",
+              "supportLevel": "requires_native_dev_or_release_build",
+              "supportsNearbyScan": false,
+              "capturedAt": "2026-04-03T08:29:54.186Z",
+              "platform": "ios",
+              "executionEnvironment": "storeClient",
+              "observedTransportType": "wifi",
+              "isConnected": true,
+              "isInternetReachable": null,
+              "isConnectionExpensive": null,
+              "ssid": null,
+              "bssid": null,
+              "strength": 0,
+              "frequency": 0,
+              "deviceCount": 0,
+              "devices": [],
+              "note": "Nearby BLE scanning is not active in Expo Go. Use a native development build or release build. Nearby BLE scanning is limited to BLE advertising devices and does not detect classic Bluetooth audio hardware. This capture ran in Expo Go, so nearby BLE scanning was not available."
+            }
+          },
+          "end": {
+            "phase": "end",
+            "capturedAt": "2026-04-03T08:30:25.456Z",
+            "wifi": {
+              "status": "captured",
+              "captureMode": "current_network_context_only",
+              "supportLevel": "current_connection_only",
+              "supportsNearbyScan": false,
+              "capturedAt": "2026-04-03T08:30:25.456Z",
+              "platform": "ios",
+              "executionEnvironment": "storeClient",
+              "observedTransportType": "wifi",
+              "isConnected": true,
+              "isInternetReachable": true,
+              "isConnectionExpensive": false,
+              "ssid": null,
+              "bssid": null,
+              "strength": 0,
+              "frequency": 0,
+              "deviceCount": 0,
+              "devices": [],
+              "note": "This build captures current network context, not a nearby Wi-Fi scan. SSID and BSSID are only attempted in a native development or release build."
+            },
+            "bluetooth": {
+              "status": "unsupported",
+              "captureMode": "nearby_ble_scan",
+              "supportLevel": "requires_native_dev_or_release_build",
+              "supportsNearbyScan": false,
+              "capturedAt": "2026-04-03T08:30:25.456Z",
+              "platform": "ios",
+              "executionEnvironment": "storeClient",
+              "observedTransportType": "wifi",
+              "isConnected": true,
+              "isInternetReachable": true,
+              "isConnectionExpensive": null,
+              "ssid": null,
+              "bssid": null,
+              "strength": 0,
+              "frequency": 0,
+              "deviceCount": 0,
+              "devices": [],
+              "note": "Nearby BLE scanning is not active in Expo Go. Use a native development build or release build. Nearby BLE scanning is limited to BLE advertising devices and does not detect classic Bluetooth audio hardware. This capture ran in Expo Go, so nearby BLE scanning was not available."
+            }
+          },
+          "limitations": [
+            "Wi-Fi evidence is current-network context only in this build.",
+            "Nearby BLE scanning only captures BLE advertising devices, not classic Bluetooth audio hardware."
+          ]
+        },
+        "consentVersion": "snitchv1-mobile",
+        "status": "ready",
+        "uploadToken": "4d0f182b16ce7536575dbef02ec38968",
+        "mimeType": "video/quicktime",
+        "fileName": "2713CA99-2906-476F-94B0-3C63C7508118.mov",
+        "fileSize": 19345555,
+        "localStartTime": "2026-04-03T08:30:05.288Z",
+        "localEndTime": "2026-04-03T08:30:25.453Z",
+        "measuredStartOffsetMs": 0,
+        "measuredEndOffsetMs": 0,
+        "appVersion": "1.0.0",
+        "deviceModel": "ios",
+        "osVersion": "ios 18.6.2",
+        "note": null,
+        "businessName": "Bean Theory Coffee",
+        "gstin": null,
+        "selectedVenue": {
+          "placeProviderId": "ChIJORecxXG55zsRi0eQvt4yxSc",
+          "provider": "google_maps",
+          "name": "Bean Theory Coffee",
+          "address": "Shop 12, Block 3, HIRANANDANI MEADOWS, Emerald Plaza, Manpada, Thane West, Thane, Maharashtra 400607, India",
+          "city": "Thane",
+          "latitude": 19.2275037,
+          "longitude": 72.9704647
+        },
+        "matchedVenue": "Bean Theory Coffee",
+        "sourceClassifierMode": "source-v2-fft",
+        "rewardState": "pending",
+        "rewardAmountInr": 0,
+        "createdAt": "2026-04-03T08:31:09.060Z",
+        "reportIds": [
+          "17091e20-d2ba-4bed-9e4c-fc292ecce198"
+        ],
+        "source": "snitchv1_mobile_pilot",
+        "hasValidSignature": false,
+        "uploadedMimeType": "video/quicktime",
+        "updatedAt": "2026-04-03T08:31:15.893Z",
+        "finalizedAt": "2026-04-03T08:31:16.844Z",
+        "processingStartedAt": "2026-04-03T08:31:17.052Z",
+        "processingError": null,
+        "processingCompletedAt": "2026-04-03T08:32:07.451Z",
+        "keyFrameAssetIds": [
+          "9430c6b3-2793-4d5e-936e-4a6618fc206c",
+          "6ec69910-ac45-4a25-96e1-47c554a1833f",
+          "058b91ce-3793-439f-96d4-2e0a1a0ceb82"
+        ],
+        "songIdentity": {
+          "title": "I Can't Help Myself (Sugar Pie Honey Bunch)",
+          "artist": "Original Motion Picture Soundtrack",
+          "label": "Universal Strategic Marketing",
+          "rights_org": "BMI",
+          "rights_text": null,
+          "pro": "BMI",
+          "album": "Forrest Gump - The Soundtrack",
+          "release_date": "2011-01-13",
+          "cover": null,
+          "external_ids": {
+            "upc": "00602537997374",
+            "isrc": "USLIC0601850",
+            "iswc": "T0709189003"
+          },
+          "external_metadata": {
+            "deezer": {
+              "album": {
+                "name": ""
+              },
+              "track": {
+                "id": "1085373022",
+                "name": "I'll Never Find Another You"
+              },
+              "artists": [
+                {
+                  "name": "The Seekers",
+                  "id": "15904"
+                }
+              ]
+            },
+            "spotify": {
+              "album": {
+                "name": "The Definitive Collection",
+                "id": "348K6QH725oW2W78lvSy1Y"
+              },
+              "track": {
+                "id": "3aSWQJcWnnqgwYbAgidvlV",
+                "name": "I Can't Help Myself (Sugar Pie, Honey Bunch)"
+              },
+              "artists": [
+                {
+                  "name": "Four Tops",
+                  "id": "7fIvjotigTGWqjIz6EP1i4"
+                }
+              ]
+            }
+          }
+        },
+        "matchedSong": "I Can't Help Myself (Sugar Pie Honey Bunch) - Original Motion Picture Soundtrack",
+        "venueId": "14719683-c4cc-4b94-bc9e-b30e4726c7f0",
+        "sourceAnalysis": {
+          "sourceClass": "likely_pa_system",
+          "confidence": 0.85,
+          "score": 100,
+          "signals": {
+            "subToMidRatio": 0.479,
+            "bassToMidRatio": 2.019,
+            "lowMidToMidRatio": 1.853,
+            "presenceToMidRatio": 0.349,
+            "highToMidRatio": 0.108,
+            "bandCoverageRatio": 0.643,
+            "ambientContinuity": 0.806,
+            "silenceRatio": 0.311,
+            "dynamicRange": 2.331,
+            "crestFactor": 6.064,
+            "overallRms": 0.03,
+            "peakOverallRms": 0.0373,
+            "windowCount": 69,
+            "windowEnergyContinuity": 0.806,
+            "windowEnergyCv": 0.155,
+            "windowEnergySlope": -0.193,
+            "lowMidWindowContinuity": 0.621,
+            "lowMidWindowCv": 0.278,
+            "lowMidEnergySlope": -0.151,
+            "bandCoverageMedian": 0.643,
+            "bandCoverageP90": 0.643,
+            "medianWindowAmbientContinuity": 0.524,
+            "peakAmbientContinuity": 0.546,
+            "peakBandCoverageRatio": 0.607,
+            "nearFieldBloomSuspicion": 0,
+            "analysisWindowStartSeconds": 10,
+            "analysisWindowDurationSeconds": 3
+          },
+          "explanation": [
+            "Low-mid continuity through roughly 160–315 Hz is preserved, which is more consistent with fuller playback systems.",
+            "Sub-bass remains present relative to the mid-band, which supports larger playback hardware more than phone playback.",
+            "Energy is distributed across a broader third-octave span, which is less typical of tiny built-in speakers.",
+            "Cross-window energy stays comparatively stable across the clip, which is more consistent with installed playback than with a nearby handheld device.",
+            "Window-to-window variance remains controlled, which supports a stable playback source.",
+            "Experimental FFT source score: 100/100 (likely pa system)."
+          ],
+          "modelVersion": "source-v2-fft",
+          "classifierMode": "source-v2-fft"
+        },
+        "visualAnalysis": {
+          "playbackContext": "inconclusive",
+          "confidence": 0.9,
+          "summary": "The frames capture the interior of 'Bean Theory Coffee', a cafe featuring tables, chairs, and patrons. While music energy was noted as high during these timestamps and an audio classifier indicated a high likelihood of a PA system, no specific audio playback equipment such as installed speakers, a DJ booth, mixer, or stage setup is clearly visible in any of the frames. A laptop is present on a table in Frame 2, and a patron is seen wearing earbuds, but neither is clearly demonstrated as the source for venue-wide music playback. Due to significant motion blur in some frames and the lack of clear visual evidence for any specific venue-scale audio source, the playback context is inconclusive based solely on the visual information.",
+          "visibleEquipment": [
+            "tables",
+            "chairs",
+            "art on wall",
+            "AC unit (Frame 2)",
+            "laptop (Frame 2)",
+            "earbuds (Frame 2)"
+          ],
+          "venueIdentitySignals": [
+            "signage 'BEAN THEORY COFFEE' (Frame 2, 3)",
+            "tables",
+            "chairs",
+            "patrons",
+            "cafe decor/art"
+          ],
+          "obstructionFlags": [
+            "motion blur (Frame 1, 3)",
+            "limited camera angle (floor-focused)",
+            "partial obstruction by people/furniture"
+          ],
+          "frameObservations": [
+            {
+              "timestampSeconds": 4.6,
+              "observation": "The frame shows a blurry view of a cafe interior with tables, chairs, and two art pieces on the wall. A person is partially visible on the right. No audio playback equipment is visible. Significant motion blur affects the clarity of the image."
+            },
+            {
+              "timestampSeconds": 10.6,
+              "observation": "This frame provides a clearer view of 'Bean Theory Coffee', with the venue's sign visible in the background. Multiple patrons are seated at tables. An AC unit is mounted on the wall. A person with a laptop is visible, and another has earbuds, but no venue-wide playback equipment is apparent."
+            },
+            {
+              "timestampSeconds": 17.44,
+              "observation": "The frame again shows the interior of 'Bean Theory Coffee' with its sign clearly visible on the back wall. Tables and chairs are prominent in the foreground. The image has some motion blur, but the cafe environment is clear. No audio playback equipment is visible."
+            }
+          ],
+          "modelVersion": "visual-v1",
+          "peakWindows": [
+            {
+              "rank": 1,
+              "startSeconds": 4.2,
+              "endSeconds": 5,
+              "timestampSeconds": 4.6,
+              "rms": 0.0417,
+              "relativeIntensity": 1.42,
+              "clipDurationSeconds": 19.97
+            },
+            {
+              "rank": 2,
+              "startSeconds": 10.2,
+              "endSeconds": 11,
+              "timestampSeconds": 10.6,
+              "rms": 0.0446,
+              "relativeIntensity": 1.53,
+              "clipDurationSeconds": 19.97
+            },
+            {
+              "rank": 3,
+              "startSeconds": 17.04,
+              "endSeconds": 17.84,
+              "timestampSeconds": 17.44,
+              "rms": 0.0394,
+              "relativeIntensity": 1.35,
+              "clipDurationSeconds": 19.97
+            }
+          ]
+        },
+        "applicationAssessment": {
+          "locationContext": "private_home",
+          "confidence": 0.5800000000000001,
+          "venueAttributionRisk": 0.3599999999999999,
+          "privateSpaceRisk": 0.6,
+          "replayRisk": 0.48,
+          "outletAmbiguityRisk": 0.04,
+          "farmingRisk": 0.92,
+          "attackReadiness": 0.18919999999999992,
+          "recommendedDisposition": "do_not_pursue",
+          "reasons": [
+            "Matched venue delta: start 31 m / end 31 m.",
+            "Capture path moved 0 m between start and end.",
+            "Selected vs matched venue anchors are 0 m apart.",
+            "Selected venue and matched venue names align.",
+            "Narrative cues suggest crowd or public-space ambience.",
+            "Visual layer surfaced 11 venue/equipment cue(s)."
+          ],
+          "evidenceGaps": [],
+          "edgeCaseTags": [
+            "screen_replay",
+            "home_recording",
+            "farming_risk"
+          ],
+          "signalSummary": {
+            "geoDistanceMeters": 31,
+            "averageAccuracyMeters": 34.065865595771086,
+            "geoBucket": "inside",
+            "primaryVenueSource": "matched_venue",
+            "capturePathDeltaMeters": 0,
+            "venueAnchorDeltaMeters": 0,
+            "withinAccuracyEnvelope": true,
+            "matchedVenueDistanceStartMeters": 31,
+            "matchedVenueDistanceEndMeters": 31,
+            "selectedVenueDistanceStartMeters": 31,
+            "selectedVenueDistanceEndMeters": 31,
+            "selectedMatchedAligned": true,
+            "venueCueCount": 11,
+            "wifiConnected": false,
+            "sourceClass": "likely_pa_system",
+            "visualPlaybackContext": "inconclusive",
+            "sameInstallRecentReports30d": 11,
+            "sameInstallWeakReports30d": 11,
+            "sameInstallDistinctVenues30d": 6
+          },
+          "modelVersion": "application-v1-fallback"
+        },
+        "rawVideoUrl": "http://127.0.0.1:3001/media/raw-video/5b855b80-0f13-414f-be47-1f04783e95e3.mov",
+        "derivedAudioUrl": "http://127.0.0.1:3001/media/derived-audio/4cf7a19c-feb8-4c08-ac06-51c7a7b27870.wav"
+      },
+      "venueHistory": {
+        "reports30Days": 1,
+        "reports90Days": 1,
+        "totalReportsAtVenue": 1
+      }
+    }
+  ]
+}

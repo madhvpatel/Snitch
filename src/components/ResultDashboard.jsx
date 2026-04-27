@@ -1,14 +1,32 @@
 import React from 'react';
-import { Music, CheckCircle, ShieldCheck, ShieldAlert, Building2, Activity, MapPin, Speaker } from 'lucide-react';
-import { AnalysisPanel } from './Forensics/AnalysisPanel';
+import { Music, ShieldCheck, ShieldAlert, Building2, Activity, MapPin, Speaker, Clock3 } from 'lucide-react';
 
 export const ResultDashboard = ({ song, location, forensicReport, permissions, requestForensics, speakerAuth }) => {
-    // Determine overall status
     const isLicensed = permissions.status === 'licensed';
+    const isPending = permissions.status === 'pending' || permissions.status === 'idle';
+    const isUnknown = permissions.status === 'unknown';
     const hasSong = !!song;
     const hasLocation = !!location;
-
     const isPASystem = speakerAuth?.label === "Large PA System";
+    const licenseTone = isLicensed
+        ? 'bg-green-500'
+        : isPending || isUnknown
+            ? 'bg-yellow-500'
+            : 'bg-red-500';
+    const licenseCopy = isLicensed
+        ? 'License Match Found'
+        : isPending
+            ? 'Awaiting License Evidence'
+            : isUnknown
+                ? 'Rights Org Unclear'
+                : 'No Matching License On File';
+    const licenseSubcopy = isLicensed
+        ? 'Uploaded license data matches the detected rights organization.'
+        : isPending
+            ? 'Upload a venue license document to compare against the detected rights org.'
+            : isUnknown
+                ? 'Song recognition did not produce a trustworthy rights organization.'
+                : 'Detected rights organization is not present in the current license wallet.';
 
 
     return (
@@ -51,17 +69,16 @@ export const ResultDashboard = ({ song, location, forensicReport, permissions, r
 
                 {/* 2. Venue & Licensing Card */}
                 <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700 shadow-xl flex flex-col text-center relative overflow-hidden">
-                    <div className={`absolute top-0 left-0 w-full h-1 ${isLicensed ? 'bg-green-500' : 'bg-red-500'}`} />
+                    <div className={`absolute top-0 left-0 w-full h-1 ${licenseTone}`} />
 
                     <div className="mb-4 flex justify-center">
-                        <div className={`p-4 rounded-full ${isLicensed ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+                        <div className={`p-4 rounded-full ${isLicensed ? 'bg-green-500/10 text-green-400' : isPending || isUnknown ? 'bg-yellow-500/10 text-yellow-400' : 'bg-red-500/10 text-red-400'}`}>
                             {isLicensed ? <ShieldCheck size={40} /> : <ShieldAlert size={40} />}
                         </div>
                     </div>
 
-                    <h3 className="text-xl font-bold text-white mb-2">
-                        {isLicensed ? "License Verified" : "Unlicensed Performance"}
-                    </h3>
+                    <h3 className="text-xl font-bold text-white mb-2">{licenseCopy}</h3>
+                    <p className="text-sm text-gray-400 mb-4">{licenseSubcopy}</p>
 
                     {hasLocation && location.venue && (
                         <div className="flex items-center justify-center gap-2 mb-6 bg-gray-700/30 py-2 px-4 rounded-full mx-auto">
@@ -78,6 +95,14 @@ export const ResultDashboard = ({ song, location, forensicReport, permissions, r
                         <div className="flex items-center justify-between text-sm text-gray-400 border-b border-gray-700 pb-2">
                             <span className="flex items-center gap-1"><MapPin size={12} /> Accuracy</span>
                             <span>{location?.accuracy?.toFixed(1)}m</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm text-gray-400 border-b border-gray-700 pb-2">
+                            <span className="flex items-center gap-1"><Clock3 size={12} /> Captured</span>
+                            <span>{location?.obtainedAt ? new Date(location.obtainedAt).toLocaleTimeString() : 'Unknown'}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm text-gray-400 pb-2">
+                            <span>Rights Org</span>
+                            <span>{song?.rightsOrg || 'Unknown'}</span>
                         </div>
                     </div>
                 </div>

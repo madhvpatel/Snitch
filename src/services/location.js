@@ -1,3 +1,5 @@
+import { API_BASE_URL } from './config';
+
 // src/services/location.js
 /**
  * Pure browser-based location service – NO external APIs
@@ -89,7 +91,7 @@ export const saveLocationToCache = (locationData) => {
  */
 export const getFoursquareVenues = async (lat, lon, accuracy, altitude) => {
     try {
-        let url = `http://localhost:3001/api/nearby-venues?ll=${lat},${lon}`;
+        let url = `${API_BASE_URL}/api/nearby-venues?ll=${lat},${lon}`;
 
         if (accuracy) url += `&hacc=${accuracy}`;
         if (altitude) url += `&altitude=${altitude}`;

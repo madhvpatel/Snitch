@@ -2,8 +2,9 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { Play, Pause, RotateCcw, Volume2, Link2, Link2Off } from 'lucide-react';
 import { WaveformGraph } from './WaveformGraph';
 import { AnalysisPanel } from './AnalysisPanel';
-import { decodeAudioFile, extractAudioPeaks, audioBufferToWav, blobToBase64 } from '../../services/audioUtils';
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { decodeAudioFile, extractAudioPeaks, createAudioSnippet } from '../../services/audioUtils';
+import { requestForensicReport } from '../../services/api';
+import { PYTHON_API_BASE_URL } from '../../services/config';
 import { FileUpload } from './FileUpload';
 
 export const MediaComparator = ({
@@ -97,7 +98,7 @@ export const MediaComparator = ({
                     formData.append('audio', videoFile);
 
                     // Call Local Python AI Service (Port 5001)
-                    const response = await fetch('http://localhost:5001/api/isolate', {
+                    const response = await fetch(`${PYTHON_API_BASE_URL}/api/isolate`, {
                         method: 'POST',
                         body: formData
                     });
@@ -176,12 +177,6 @@ export const MediaComparator = ({
             return;
         }
 
-        const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-        if (!apiKey) {
-            setAiError("VITE_GEMINI_API_KEY not set in environment");
-            return;
-        }
-
         setAiLoading(true);
         setAiError(null);
 
@@ -210,69 +205,17 @@ export const MediaComparator = ({
             }
 
             // 3. Create Audio Snippet (10s around peak)
-            const snippetDuration = 10;
-            const startTime = Math.max(0, peakTime - snippetDuration / 2);
-            const ctx = new OfflineAudioContext(buffer.numberOfChannels, buffer.sampleRate * snippetDuration, buffer.sampleRate);
-            const startSample = Math.floor(startTime * buffer.sampleRate);
-            const lengthSample = Math.floor(snippetDuration * buffer.sampleRate);
-
-            const snippetBuffer = ctx.createBuffer(buffer.numberOfChannels, lengthSample, buffer.sampleRate);
-
-            for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
-                const nowBuffering = snippetBuffer.getChannelData(channel);
-                const sourceData = buffer.getChannelData(channel);
-                for (let i = 0; i < lengthSample; i++) {
-                    if (startSample + i < sourceData.length) {
-                        nowBuffering[i] = sourceData[startSample + i];
-                    }
-                }
-            }
-
-            const wavBlob = audioBufferToWav(snippetBuffer);
-            const base64Audio = await blobToBase64(wavBlob);
-
-            // 4. Call Gemini
-            const genAI = new GoogleGenerativeAI(apiKey);
-            const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
-            const prompt = `
-                Perform a forensic audio-visual analysis of this footage.
-                You are a forensic audio engineer verifying if a video recording contains audio played from speakers in a room ("Room Sound") or if the audio was overlaid directly ("Direct Feed").
-                
-                The provided audio clip is centered around the loudest peak timestamp: ${peakTime.toFixed(2)}s.
-                
-                **1. Visual Analysis (Frame):**
-                - Identify audio sources: Large PA speakers, club monitors, DJ booth, or home speakers.
-                - Describe the acoustic environment: Club (reflective, crowded), small room (dampened), or outdoor.
-                - **Crucial**: Do you see a microphone capturing the sound, or is the camera the likely recorder?
-
-                **2. Acoustic Analysis (Audio):**
-                - **Reverb/Ambience**: Is there "room tone" or natural reverb tails? (Indicates Room Sound). Or is it perfectly dry/clean? (Indicates Direct Feed).
-                - **Frequency Response**: Is the sub-bass distorted or "air-moving" (Room)? Or perfect digital silence between beats?
-                - **Crowd/Noise**: Can you hear crowd noise, chatter, or clinking glasses mixed *into* the music?
-
-                **3. Synchronization Check:**
-                - Does the visual energy (lights, crowd movement, speaker cone vibration) match the audio beat?
-
-                **Verdict Requirements:**
-                - **Verdict**: [Room Speaker (Diegetic)] OR [Direct Feed (Non-Diegetic)] OR [Inconclusive]
-                - **Confidence**: [High/Medium/Low]
-                
-                **Format**: Provide a professional bulleted report. Be concise but technical.
-            `;
-
-            const parts = [
-                { inlineData: { data: base64Audio, mimeType: "audio/wav" } },
-                { text: prompt }
-            ];
-
-            if (base64Image) {
-                parts.unshift({ inlineData: { data: base64Image, mimeType: "image/jpeg" } });
-            }
-
-            const result = await model.generateContent(parts);
-            const response = await result.response;
-            setAiReport(response.text());
+            const snippet = createAudioSnippet(buffer, {
+                durationSeconds: 10,
+                centerTime: peakTime
+            });
+            const report = await requestForensicReport({
+                audioBlob: snippet.blob,
+                peakTime,
+                frameDataUrl: base64Image ? `data:image/jpeg;base64,${base64Image}` : null,
+                mode: 'detail'
+            });
+            setAiReport(report);
 
         } catch (err) {
             console.error("AI Report Error:", err);
@@ -293,7 +236,7 @@ export const MediaComparator = ({
             formData.append('audio', videoFile);
 
             // Call Local Python AI Service (Port 5001)
-            const response = await fetch('http://localhost:5001/api/isolate', {
+            const response = await fetch(`${PYTHON_API_BASE_URL}/api/isolate`, {
                 method: 'POST',
                 body: formData
             });
@@ -596,11 +539,9 @@ export const MediaComparator = ({
                             <WaveformGraph
                                 data={analysis.data}
                                 currentTime1={currentTime1}
-                                currentTime2={currentTime2}
                                 duration={analysis.duration}
                                 onSeek={handleSeek}
                                 originalPeakRegion={analysis.originalPeakRegion}
-                                isolatedPeakRegion={analysis.isolatedPeakRegion}
                                 stemBuffers={analysis.stemBuffers}
                             />
                         </div>

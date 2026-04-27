@@ -1,3 +1,5 @@
+import { API_BASE_URL } from './config';
+
 export const decodeAudioFile = async (fileOrBlob, context) => {
     const arrayBuffer = await fileOrBlob.arrayBuffer();
     return await context.decodeAudioData(arrayBuffer);
@@ -173,12 +175,55 @@ export const blobToBase64 = (blob) => {
     });
 };
 
+export const findPeakTime = (buffer) => {
+    const rawData = buffer.getChannelData(0);
+    let maxAmp = 0;
+    let maxIndex = 0;
+    const step = 1000;
+
+    for (let i = 0; i < rawData.length; i += step) {
+        const amp = Math.abs(rawData[i]);
+        if (amp > maxAmp) {
+            maxAmp = amp;
+            maxIndex = i;
+        }
+    }
+
+    return maxIndex / buffer.sampleRate;
+};
+
+export const createAudioSnippet = (buffer, { durationSeconds = 10, centerTime = null } = {}) => {
+    const effectiveDuration = Math.min(durationSeconds, buffer.duration || durationSeconds);
+    const snippetLength = Math.max(1, Math.floor(buffer.sampleRate * effectiveDuration));
+    const resolvedCenterTime = centerTime ?? findPeakTime(buffer);
+    const startTime = Math.max(0, Math.min(buffer.duration - effectiveDuration, resolvedCenterTime - (effectiveDuration / 2)));
+    const startSample = Math.max(0, Math.floor(startTime * buffer.sampleRate));
+
+    const snippetBuffer = new AudioBuffer({
+        length: snippetLength,
+        numberOfChannels: buffer.numberOfChannels,
+        sampleRate: buffer.sampleRate
+    });
+
+    for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+        const sourceData = buffer.getChannelData(channel);
+        const targetData = snippetBuffer.getChannelData(channel);
+        targetData.set(sourceData.subarray(startSample, startSample + snippetLength));
+    }
+
+    return {
+        blob: audioBufferToWav(snippetBuffer),
+        centerTime: resolvedCenterTime,
+        startTime
+    };
+};
+
 export const extractAudioFromVideo = async (videoFile) => {
     // Use backend FFmpeg extraction instead of browser-based (more reliable)
     const formData = new FormData();
     formData.append('video', videoFile);
 
-    const response = await fetch('http://localhost:3001/api/extract-audio', {
+    const response = await fetch(`${API_BASE_URL}/api/extract-audio`, {
         method: 'POST',
         body: formData
     });

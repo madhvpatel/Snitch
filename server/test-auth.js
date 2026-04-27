@@ -1,7 +1,6 @@
 import crypto from 'crypto';
 import fetch from 'node-fetch';
 import FormData from 'form-data';
-import fs from 'fs';
 import dotenv from 'dotenv';
 
 dotenv.config();

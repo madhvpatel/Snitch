@@ -1,0 +1,319 @@
+[
+  {
+    "id": "810b7d5e-353e-40d6-90b0-3e8fee8f5325",
+    "reference": "REP-641807",
+    "submissionId": "7c648afd-5a69-44b4-b6e1-e6bb2dc43a15",
+    "venueId": "4ab90ebe-e889-4533-92b7-b399ceadefd9",
+    "placeProviderId": "58469c303ab143bb194be8a1",
+    "matchedTrackId": null,
+    "matchedTrackConfidence": 0.25,
+    "rightsOwnerOrgId": null,
+    "rightsType": null,
+    "title": "sun saawariya",
+    "artist": "Accha Insaan, AtharvaMusic, Yaani Karnawat",
+    "label": "Mass Appeal / Mashooriya Originals",
+    "rightsOrg": null,
+    "forensicSummary": "*   Music is clearly audible, featuring a fast-paced electronic track with prominent beats and synth elements.\n*   The audio predominantly captures room playback, evidenced by significant crowd noise (chatter, singing along, cheers) and a high level of natural reverberation.\n*   A strong, somewhat boomy low-end characterizes the music, contributing to the perceived live venue sound.\n*   Mild clipping or distortion is occasionally audible during louder musical passages or crowd peaks.\n\nConclusion: The recording captures live venue ambience with music played back through the room's sound system, mixed with active crowd participation and room acoustics.",
+    "sourceAnalysis": {
+      "sourceClass": "likely_small_speaker",
+      "confidence": 0.56,
+      "score": 74,
+      "signals": {
+        "subToMidRatio": 0.448,
+        "bassToMidRatio": 0.895,
+        "highToMidRatio": 0.306,
+        "ambientContinuity": 0.719,
+        "silenceRatio": 0.378,
+        "dynamicRange": 1.643,
+        "crestFactor": 6.688,
+        "overallRms": 0.1347,
+        "nearFieldBloomSuspicion": 1,
+        "analysisWindowStartSeconds": 7.25,
+        "analysisWindowDurationSeconds": 3
+      },
+      "explanation": [
+        "Low-end energy is strong relative to mids, which is more consistent with larger playback hardware.",
+        "Energy remains present between louder moments, which suggests room playback rather than close direct playback.",
+        "High-frequency extension is reasonably preserved, which is less typical of tiny device speakers.",
+        "Large portions of the analysis window fall near silence, so the result is less decisive.",
+        "Strong bass combined with unusually steady loudness can also come from a nearby phone or small speaker, so PA certainty is reduced.",
+        "Deterministic source score: 74/100 (likely small speaker)."
+      ],
+      "modelVersion": "source-v1"
+    },
+    "deviceTrustBand": "low",
+    "merchantMasterId": "6e77f080-5fd0-4e22-b39d-416c89c49db2",
+    "caseId": "5d0432aa-cd7d-4763-9a18-c6d72e9ab509",
+    "rewardEligibility": false,
+    "rewardDisposition": "not_reward_eligible",
+    "estimatedRecoverableValueInr": 75000,
+    "licenseAssessment": {
+      "status": "unknown",
+      "source": "unmatched-venue-or-org",
+      "validFrom": null,
+      "validTo": null,
+      "lastVerifiedAt": null
+    },
+    "analystStatus": "unreviewed",
+    "exportStatus": "not_exported",
+    "createdAt": "2026-03-22T13:41:51.417Z",
+    "updatedAt": "2026-03-22T13:41:51.417Z",
+    "org": null,
+    "venue": {
+      "id": "4ab90ebe-e889-4533-92b7-b399ceadefd9",
+      "placeProviderId": "58469c303ab143bb194be8a1",
+      "fallbackKey": "0a6dc1ac82bc",
+      "name": "Lounge 18",
+      "address": "103 Block 2, Emerald Plaza, Hiranandani Meadows, Thāne 400610, Mahārāshtra",
+      "city": "Thāne",
+      "latitude": 19.227279048227174,
+      "longitude": 72.97042007020193,
+      "createdAt": "2026-03-22T13:34:02.848Z",
+      "lastSeenAt": "2026-03-22T13:41:44.649Z"
+    },
+    "merchant": {
+      "id": "6e77f080-5fd0-4e22-b39d-416c89c49db2",
+      "venueId": "4ab90ebe-e889-4533-92b7-b399ceadefd9",
+      "placeProviderId": "58469c303ab143bb194be8a1",
+      "venueName": "Lounge 18",
+      "address": "103 Block 2, Emerald Plaza, Hiranandani Meadows, Thāne 400610, Mahārāshtra",
+      "city": "Thāne",
+      "legalEntityName": null,
+      "gstin": null,
+      "cityTier": "tier_2",
+      "venueType": "restaurant_bar_lounge",
+      "hotelStarClass": null,
+      "outletCount": 1,
+      "eventCapability": "standard",
+      "rightsLayersApplicable": [
+        "label",
+        "collective"
+      ],
+      "createdAt": "2026-03-22T13:34:10.031Z",
+      "updatedAt": "2026-03-22T13:41:51.417Z"
+    },
+    "case": {
+      "id": "5d0432aa-cd7d-4763-9a18-c6d72e9ab509",
+      "reference": "CASE-F535FB",
+      "venueId": "4ab90ebe-e889-4533-92b7-b399ceadefd9",
+      "rightsOwnerOrgId": null,
+      "rightsType": null,
+      "primaryContributorId": null,
+      "primaryInstallId": "c5fd6571-69ad-48b0-ad28-1e9e58496cac",
+      "primaryReportId": "30ba71b6-8fb9-43f2-9b9f-860b5c6d27e5",
+      "primarySubmissionId": "2df81ef5-eab2-4680-ade8-26654700f874",
+      "reportIds": [
+        "30ba71b6-8fb9-43f2-9b9f-860b5c6d27e5",
+        "810b7d5e-353e-40d6-90b0-3e8fee8f5325"
+      ],
+      "corroborationReportIds": [
+        "810b7d5e-353e-40d6-90b0-3e8fee8f5325"
+      ],
+      "evidenceCount": 2,
+      "merchantMasterId": "6e77f080-5fd0-4e22-b39d-416c89c49db2",
+      "licenseStatus": "unknown",
+      "licenseSource": "unmatched-venue-or-org",
+      "rewardEligible": false,
+      "caseStatus": "pending_license_verification",
+      "planningBand": "Restaurant, bar, lounge, or pub",
+      "estimatedRecoverableValueInr": 75000,
+      "realizedValueInr": 0,
+      "settlementSignedAt": null,
+      "outcomeType": null,
+      "tariffIds": [],
+      "collectionProbability": 0.4,
+      "nonComplianceMultiplier": 1,
+      "createdAt": "2026-03-22T13:34:10.031Z",
+      "updatedAt": "2026-03-22T13:41:51.417Z",
+      "merchant": {
+        "id": "6e77f080-5fd0-4e22-b39d-416c89c49db2",
+        "venueId": "4ab90ebe-e889-4533-92b7-b399ceadefd9",
+        "placeProviderId": "58469c303ab143bb194be8a1",
+        "venueName": "Lounge 18",
+        "address": "103 Block 2, Emerald Plaza, Hiranandani Meadows, Thāne 400610, Mahārāshtra",
+        "city": "Thāne",
+        "legalEntityName": null,
+        "gstin": null,
+        "cityTier": "tier_2",
+        "venueType": "restaurant_bar_lounge",
+        "hotelStarClass": null,
+        "outletCount": 1,
+        "eventCapability": "standard",
+        "rightsLayersApplicable": [
+          "label",
+          "collective"
+        ],
+        "createdAt": "2026-03-22T13:34:10.031Z",
+        "updatedAt": "2026-03-22T13:41:51.417Z"
+      },
+      "contributor": null,
+      "rewardSummary": {
+        "heldAmountInr": 0,
+        "paidAmountInr": 0,
+        "reversedAmountInr": 0
+      },
+      "rewards": []
+    },
+    "reviews": [],
+    "submission": {
+      "id": "7c648afd-5a69-44b4-b6e1-e6bb2dc43a15",
+      "reference": "SC-52C1BB",
+      "captureSessionId": "a5f65b0f-71f5-4408-b608-a6005215cca7",
+      "installId": "c5fd6571-69ad-48b0-ad28-1e9e58496cac",
+      "mobileUserId": "mobile_bc45b056-f729-463f-955d-448751442315",
+      "rawVideoAssetId": "9b049277-c5e4-4f17-ba33-5f4b4185c2b8",
+      "derivedAudioAssetId": "1569497d-3a9a-45d7-a287-cbf7f9d13416",
+      "mediaSha256": "13e67db559f5c8885ea3298d115cc82bd9d139477879f34f3e1d933f9c0b14ef",
+      "durationSeconds": 20,
+      "geolocationStart": {
+        "lat": 19.227279048081453,
+        "lon": 72.97042007015654,
+        "capturedAt": "2026-03-22T13:40:54.525Z"
+      },
+      "geolocationEnd": {
+        "lat": 19.227279048227174,
+        "lon": 72.97042007020193,
+        "capturedAt": "2026-03-22T13:41:14.659Z"
+      },
+      "consentVersion": "snitchv1-mobile",
+      "status": "ready",
+      "uploadToken": "6d484f6e40417a801b4c3272ba7b1ac6",
+      "mimeType": "video/quicktime",
+      "fileName": "69B6AAD2-7E56-4CF8-A08F-F5FB75B7A542.mov",
+      "fileSize": 19365064,
+      "localStartTime": "2026-03-22T13:40:54.525Z",
+      "localEndTime": "2026-03-22T13:41:14.659Z",
+      "measuredStartOffsetMs": 0,
+      "measuredEndOffsetMs": 0,
+      "appVersion": "1.0.0",
+      "deviceModel": "ios",
+      "osVersion": "ios 18.6.2",
+      "note": null,
+      "businessName": "Lounge 18",
+      "gstin": null,
+      "selectedVenue": {
+        "placeProviderId": "58469c303ab143bb194be8a1",
+        "name": "Lounge 18",
+        "address": "103 Block 2, Emerald Plaza, Hiranandani Meadows, Thāne 400610, Mahārāshtra",
+        "city": "Thāne",
+        "latitude": null,
+        "longitude": null
+      },
+      "matchedVenue": "Lounge 18",
+      "rewardState": "pending",
+      "rewardAmountInr": 0,
+      "createdAt": "2026-03-22T13:41:30.151Z",
+      "reportIds": [
+        "810b7d5e-353e-40d6-90b0-3e8fee8f5325"
+      ],
+      "source": "snitchv1_mobile_pilot",
+      "hasValidSignature": false,
+      "uploadedMimeType": "video/quicktime",
+      "updatedAt": "2026-03-22T13:41:33.828Z",
+      "finalizedAt": "2026-03-22T13:41:34.805Z",
+      "processingStartedAt": "2026-03-22T13:41:34.995Z",
+      "processingError": null,
+      "processingCompletedAt": "2026-03-22T13:41:51.417Z",
+      "songIdentity": {
+        "title": "sun saawariya",
+        "artist": "Accha Insaan, AtharvaMusic, Yaani Karnawat",
+        "label": "Mass Appeal / Mashooriya Originals",
+        "rights_org": null,
+        "rights_text": null,
+        "pro": null,
+        "album": "sun saawariya",
+        "release_date": "2026-01-09",
+        "cover": null,
+        "external_ids": {
+          "upc": "0820200122551",
+          "isrc": "US6R22533610"
+        },
+        "external_metadata": {
+          "spotify": {
+            "track": {
+              "id": "0EaoKYYYIz9rP31WgCXEBy",
+              "name": "sun saawariya"
+            },
+            "album": {
+              "name": "sun saawariya",
+              "id": "1b9GmnZcjJN645baQTtnCh"
+            },
+            "artists": [
+              {
+                "name": "Accha Insaan",
+                "id": "5kTO2lNG7ub2Bed7CF8zpH"
+              },
+              {
+                "name": "AtharvaMusic",
+                "id": "689wgdJ8FExzGjaiehjfTS"
+              },
+              {
+                "name": "Yaani Karnawat",
+                "id": "2DQRnUEWF0YPw4vXHgJzq8"
+              }
+            ]
+          },
+          "deezer": {
+            "track": {
+              "id": "3714516142",
+              "name": "sun saawariya"
+            },
+            "album": {
+              "name": "sun saawariya",
+              "id": "876569492"
+            },
+            "artists": [
+              {
+                "name": "Accha Insaan",
+                "id": "119653212"
+              },
+              {
+                "name": "AtharvaMusic",
+                "id": "99675362"
+              },
+              {
+                "name": "Yaani Karnawat",
+                "id": "241302771"
+              }
+            ]
+          }
+        }
+      },
+      "matchedSong": "sun saawariya - Accha Insaan, AtharvaMusic, Yaani Karnawat",
+      "venueId": "4ab90ebe-e889-4533-92b7-b399ceadefd9",
+      "sourceAnalysis": {
+        "sourceClass": "likely_small_speaker",
+        "confidence": 0.56,
+        "score": 74,
+        "signals": {
+          "subToMidRatio": 0.448,
+          "bassToMidRatio": 0.895,
+          "highToMidRatio": 0.306,
+          "ambientContinuity": 0.719,
+          "silenceRatio": 0.378,
+          "dynamicRange": 1.643,
+          "crestFactor": 6.688,
+          "overallRms": 0.1347,
+          "nearFieldBloomSuspicion": 1,
+          "analysisWindowStartSeconds": 7.25,
+          "analysisWindowDurationSeconds": 3
+        },
+        "explanation": [
+          "Low-end energy is strong relative to mids, which is more consistent with larger playback hardware.",
+          "Energy remains present between louder moments, which suggests room playback rather than close direct playback.",
+          "High-frequency extension is reasonably preserved, which is less typical of tiny device speakers.",
+          "Large portions of the analysis window fall near silence, so the result is less decisive.",
+          "Strong bass combined with unusually steady loudness can also come from a nearby phone or small speaker, so PA certainty is reduced.",
+          "Deterministic source score: 74/100 (likely small speaker)."
+        ],
+        "modelVersion": "source-v1"
+      },
+      "rawVideoUrl": "http://127.0.0.1:3001/media/raw-video/9b049277-c5e4-4f17-ba33-5f4b4185c2b8.mov",
+      "derivedAudioUrl": "http://127.0.0.1:3001/media/derived-audio/1569497d-3a9a-45d7-a287-cbf7f9d13416.wav"
+    },
+    "venueHistory": {
+      "reports30Days": 2,
+      "reports90Days": 2
+    }
+  }
+]

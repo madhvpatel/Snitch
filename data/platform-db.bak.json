@@ -1,0 +1,211 @@
+{
+  "version": 3,
+  "orgs": [
+    {
+      "id": "org_platform_admin",
+      "slug": "platform-admin",
+      "type": "platform",
+      "jurisdiction": "IN",
+      "name": "Snitch Platform",
+      "status": "active",
+      "portalSettings": {
+        "color": "slate",
+        "proCode": null
+      }
+    },
+    {
+      "id": "org_label_saregama",
+      "slug": "saregama-demo",
+      "type": "label",
+      "jurisdiction": "IN",
+      "name": "Saregama Demo",
+      "status": "active",
+      "portalSettings": {
+        "color": "amber",
+        "proCode": null
+      }
+    },
+    {
+      "id": "org_collective_iprs",
+      "slug": "iprs-demo",
+      "type": "collective",
+      "jurisdiction": "IN",
+      "name": "IPRS Demo",
+      "status": "active",
+      "portalSettings": {
+        "color": "emerald",
+        "proCode": "IPRS"
+      }
+    }
+  ],
+  "orgUsers": [
+    {
+      "id": "user_admin_demo",
+      "orgId": "org_platform_admin",
+      "email": "admin@snitch.local",
+      "displayName": "Platform Admin",
+      "role": "admin",
+      "isPlatformAdmin": true,
+      "totpSecret": "JBSWY3DPEHPK3PXP",
+      "passwordSalt": "snitch-demo-salt-0",
+      "passwordHash": "c8a3430e2ccebd9a8d712b37a6923d68c7be85b4fe158a2cf3ebb43fa8a606ae85ebd4191516d1bc64ae287ce6a31638ee64c5cbdb7c99960d1693f7a11abe27",
+      "status": "active",
+      "createdAt": "2026-03-22T13:47:04.278Z"
+    },
+    {
+      "id": "user_label_demo",
+      "orgId": "org_label_saregama",
+      "email": "label@saregama.demo",
+      "displayName": "Saregama Analyst",
+      "role": "manager",
+      "isPlatformAdmin": false,
+      "totpSecret": "KRSXG5DSNFXGOIDB",
+      "passwordSalt": "snitch-demo-salt-1",
+      "passwordHash": "650e8948da4cb85b896d808c2a95f7fab42a5f4dccf24990461ab03bf04c032e9cccbf2aed3d46c264c886710519086e695f7df52a0203b19ed4d6f8f49034f3",
+      "status": "active",
+      "createdAt": "2026-03-22T13:47:04.299Z"
+    },
+    {
+      "id": "user_collective_demo",
+      "orgId": "org_collective_iprs",
+      "email": "iprs@snitch.demo",
+      "displayName": "IPRS Analyst",
+      "role": "manager",
+      "isPlatformAdmin": false,
+      "totpSecret": "MFZXK4TFOI======",
+      "passwordSalt": "snitch-demo-salt-2",
+      "passwordHash": "abd0ff4e9084ceba63620a1a33934bee90162397ab576568ed0909f98dd594e88a7516abab1ff41fcb50b7b6f59fbf336c25d7d6bea732c81f02a9757f8f763d",
+      "status": "active",
+      "createdAt": "2026-03-22T13:47:04.322Z"
+    }
+  ],
+  "mobileUsers": [],
+  "anonymousInstalls": [],
+  "captureSessions": [],
+  "submissions": [],
+  "reports": [],
+  "venues": [],
+  "catalogTracks": [
+    {
+      "id": "track_demo_1",
+      "orgId": "org_label_saregama",
+      "title": "Test Song",
+      "artist": "The Fixtures",
+      "isrc": "IN-SN1-24-00001",
+      "externalIds": [],
+      "activeFrom": "2024-01-01",
+      "activeTo": null,
+      "createdAt": "2026-03-22T13:47:04.322Z"
+    }
+  ],
+  "venueCoverage": [],
+  "analystReviews": [],
+  "casePackets": [],
+  "assets": [],
+  "contributors": [
+    {
+      "id": "contrib_delhi_verified",
+      "inviteCode": "DELHI-VERIFIED-2026",
+      "displayName": "Delhi Verified Network",
+      "status": "active",
+      "trustTier": "verified",
+      "city": "New Delhi",
+      "notes": "Seeded invite-only contributor for rewards demos.",
+      "createdAt": "2026-03-22T13:47:04.322Z"
+    },
+    {
+      "id": "contrib_mumbai_scout",
+      "inviteCode": "MUMBAI-SCOUT-2026",
+      "displayName": "Mumbai Scout Network",
+      "status": "active",
+      "trustTier": "scout",
+      "city": "Mumbai",
+      "notes": "Seeded invite-only contributor for rewards demos.",
+      "createdAt": "2026-03-22T13:47:04.322Z"
+    }
+  ],
+  "merchantMaster": [],
+  "licenseStatus": [],
+  "tariffTable": [
+    {
+      "id": "tariff_iprs_t1_restaurant",
+      "orgId": "org_collective_iprs",
+      "rightsLayer": "collective",
+      "venueType": "restaurant_bar_lounge",
+      "cityTier": "tier_1",
+      "basis": "annual",
+      "minimumFeeInr": 180000,
+      "sourceUrl": "https://www.iprs.org/wp-content/uploads/TARIFF-RB.pdf",
+      "effectiveFrom": "2025-01-01",
+      "effectiveTo": null,
+      "notes": "Planning anchor for restaurants/bars in tier-1 cities."
+    },
+    {
+      "id": "tariff_iprs_t2_restaurant",
+      "orgId": "org_collective_iprs",
+      "rightsLayer": "collective",
+      "venueType": "restaurant_bar_lounge",
+      "cityTier": "tier_2",
+      "basis": "annual",
+      "minimumFeeInr": 110000,
+      "sourceUrl": "https://www.iprs.org/wp-content/uploads/TARIFF-RB.pdf",
+      "effectiveFrom": "2025-01-01",
+      "effectiveTo": null,
+      "notes": "Planning anchor for restaurants/bars outside tier-1 cities."
+    },
+    {
+      "id": "tariff_label_t1_standard",
+      "orgId": "org_label_saregama",
+      "rightsLayer": "label",
+      "venueType": "restaurant_bar_lounge",
+      "cityTier": "tier_1",
+      "basis": "annual",
+      "minimumFeeInr": 85000,
+      "sourceUrl": "https://www.pplindia.org/tariffs",
+      "effectiveFrom": "2025-01-01",
+      "effectiveTo": null,
+      "notes": "Planning anchor for label-side sound recording exposure."
+    },
+    {
+      "id": "tariff_label_t2_standard",
+      "orgId": "org_label_saregama",
+      "rightsLayer": "label",
+      "venueType": "restaurant_bar_lounge",
+      "cityTier": "tier_2",
+      "basis": "annual",
+      "minimumFeeInr": 50000,
+      "sourceUrl": "https://www.pplindia.org/tariffs",
+      "effectiveFrom": "2025-01-01",
+      "effectiveTo": null,
+      "notes": "Planning anchor for label-side sound recording exposure."
+    },
+    {
+      "id": "tariff_collective_event",
+      "orgId": "org_collective_iprs",
+      "rightsLayer": "collective",
+      "venueType": "event_property",
+      "cityTier": "tier_1",
+      "basis": "event",
+      "minimumFeeInr": 350000,
+      "sourceUrl": "https://www.novex.in/wp-content/uploads/2024/12/NYE-Rate-Card.pdf",
+      "effectiveFrom": "2025-01-01",
+      "effectiveTo": null,
+      "notes": "Event rights planning anchor."
+    },
+    {
+      "id": "tariff_label_event",
+      "orgId": "org_label_saregama",
+      "rightsLayer": "label",
+      "venueType": "event_property",
+      "cityTier": "tier_1",
+      "basis": "event",
+      "minimumFeeInr": 400000,
+      "sourceUrl": "https://www.novex.in/wp-content/uploads/2024/12/NYE-Rate-Card.pdf",
+      "effectiveFrom": "2025-01-01",
+      "effectiveTo": null,
+      "notes": "Event rights planning anchor."
+    }
+  ],
+  "caseLedger": [],
+  "rewardLedger": []
+}

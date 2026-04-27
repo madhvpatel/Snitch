@@ -2,23 +2,26 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Mic, Square, Volume2 } from 'lucide-react';
 
 const LyricsRecognizer = ({ onLyricsComplete }) => {
+    const speechRecognitionCtor = typeof window !== 'undefined'
+        ? (window.SpeechRecognition || window.webkitSpeechRecognition)
+        : null;
     const [isListening, setIsListening] = useState(false);
     const [transcript, setTranscript] = useState('');
     const [interimTranscript, setInterimTranscript] = useState('');
-    const [supported, setSupported] = useState(true);
     const recognitionRef = useRef(null);
+    const isListeningRef = useRef(false);
 
     useEffect(() => {
-        // Check if browser supports Web Speech API
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        isListeningRef.current = isListening;
+    }, [isListening]);
 
-        if (!SpeechRecognition) {
-            setSupported(false);
+    useEffect(() => {
+        if (!speechRecognitionCtor) {
             return;
         }
 
         // Initialize speech recognition
-        const recognition = new SpeechRecognition();
+        const recognition = new speechRecognitionCtor();
         recognition.continuous = true;
         recognition.interimResults = true;
         recognition.lang = 'en-US';
@@ -51,9 +54,13 @@ const LyricsRecognizer = ({ onLyricsComplete }) => {
         };
 
         recognition.onend = () => {
-            if (isListening) {
+            if (isListeningRef.current) {
                 // Restart if it stops unexpectedly
-                recognition.start();
+                try {
+                    recognition.start();
+                } catch (error) {
+                    console.error('Speech recognition restart failed:', error);
+                }
             }
         };
 
@@ -64,7 +71,7 @@ const LyricsRecognizer = ({ onLyricsComplete }) => {
                 recognition.stop();
             }
         };
-    }, [isListening]);
+    }, [speechRecognitionCtor]);
 
     const startListening = () => {
         if (!recognitionRef.current) return;
@@ -95,7 +102,7 @@ const LyricsRecognizer = ({ onLyricsComplete }) => {
 
     const displayText = transcript + (interimTranscript ? ` ${interimTranscript}` : '');
 
-    if (!supported) {
+    if (!speechRecognitionCtor) {
         return (
             <div className="flex flex-col items-center gap-4 p-6 bg-gray-800 rounded-xl shadow-lg border border-gray-700">
                 <div className="text-red-400 text-center">

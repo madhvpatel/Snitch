@@ -1,3 +1,119 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    font-family: 'Inter', sans-serif;
+    color: #fafafa;
+    background: #09090b;
+    --authority-bg: #09090b;
+    --authority-panel: rgba(24, 24, 27, 0.9);
+    --authority-panel-strong: rgba(39, 39, 42, 0.94);
+    --authority-border: rgba(63, 63, 70, 0.64);
+    --authority-border-soft: rgba(63, 63, 70, 0.3);
+    --authority-gold: #6366f1; /* Accent -> Indigo */
+    --authority-olive: #10b981; /* Olive -> Emerald */
+    --authority-copper: #f59e0b; /* Copper -> Amber */
+    --authority-ink: #f4f4f5;
+    --authority-muted: #a1a1aa;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    background: #09090b;
+  }
+
+  body {
+    min-height: 100vh;
+    margin: 0;
+    background: 
+      radial-gradient(circle at 50% -20%, rgba(99, 102, 241, 0.1), transparent 50%),
+      #09090b;
+    color: #fafafa;
+    letter-spacing: -0.01em;
+    text-rendering: optimizeLegibility;
+  }
+
+  * { box-sizing: border-box; }
+
+  #root {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+  }
+
+  code, pre, .font-mono { font-family: 'IBM Plex Mono', monospace; }
+
+  button, input, select, textarea { font: inherit; }
+
+  button {
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+  }
+
+  a { color: inherit; text-decoration: none; }
+
+  ::selection {
+    background: rgba(99, 102, 241, 0.3);
+    color: #fff;
+  }
+}
+
+@layer components {
+  .authority-shell {
+    background: transparent;
+  }
+
+  .authority-panel {
+    position: relative;
+    border: 1px solid var(--authority-border);
+    background: var(--authority-panel);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(12px);
+  }
+
+  .authority-panel::before {
+    content: '';
+    position: absolute;
+    inset: 1px;
+    border-radius: inherit;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    pointer-events: none;
+  }
+
+  .authority-grid-bg {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 32px 32px;
+    background-position: center;
+  }
+
+  .authority-label {
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-size: 0.65rem;
+  }
+
+  .authority-data {
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 0.02em;
+  }
+  
+  .authority-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(99, 102, 241, 0.5) rgba(24, 24, 27, 0.8);
+  }
+
+  .authority-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+  .authority-scrollbar::-webkit-scrollbar-track { background: rgba(24, 24, 27, 0.9); border-radius: 999px; }
+  .authority-scrollbar::-webkit-scrollbar-thumb {
+    background: #4f46e5;
+    border: 2px solid rgba(24, 24, 27, 0.9);
+    border-radius: 999px;
+  }
+  .authority-scrollbar::-webkit-scrollbar-thumb:hover { background: #6366f1; }
+}

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { Upload, FileText, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { createWorker } from 'tesseract.js';
 
@@ -21,14 +21,18 @@ const LicenseUploader = ({ onLicenseVerified }) => {
             console.log("OCR Text:", text);
 
             // Basic Validation Logic (Mocking the "Digital Notary")
-            const hasASCAP = /ASCAP/i.test(text);
-            const hasBMI = /BMI/i.test(text);
-            const yearMatch = text.match(/20\d{2}/); // Find a year
-            const currentYear = new Date().getFullYear();
+            const orgMatchers = [
+                ['ASCAP', /\bASCAP\b|AMERICAN SOCIETY OF COMPOSERS/i],
+                ['BMI', /\bBMI\b|BROADCAST MUSIC/i],
+                ['SESAC', /\bSESAC\b/i],
+                ['GMR', /\bGMR\b|GLOBAL MUSIC RIGHTS/i],
+                ['PRS', /\bPRS\b|PRS FOR MUSIC/i],
+                ['GEMA', /\bGEMA\b/i],
+            ];
 
-            let detectedPRO = [];
-            if (hasASCAP) detectedPRO.push('ASCAP');
-            if (hasBMI) detectedPRO.push('BMI');
+            const detectedPRO = orgMatchers
+                .filter(([, pattern]) => pattern.test(text))
+                .map(([name]) => name);
 
             if (detectedPRO.length > 0) {
                 setUploadStatus('success');
@@ -36,7 +40,7 @@ const LicenseUploader = ({ onLicenseVerified }) => {
                 onLicenseVerified({ pros: detectedPRO, rawText: text, file });
             } else {
                 setUploadStatus('error');
-                setMessage('Could not verify license. Ensure PRO name (ASCAP/BMI) is visible.');
+                setMessage('Could not verify license. Ensure a PRO name such as ASCAP, BMI, SESAC, GMR, PRS, or GEMA is visible.');
             }
 
         } catch (err) {
