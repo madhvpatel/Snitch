@@ -3,6 +3,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { mergeSeedRecords, seedContributors, seedTariffTable } from './platformRewards.js';
+import { canonicalCollectionDefaults } from './schema.js';
+import { productionTableDefaults } from './productionSchema.js';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.SNITCH_DATA_DIR
@@ -69,12 +71,16 @@ const ensureArray = (value) => (Array.isArray(value) ? value : []);
 const normalizePlatformData = (data) => {
     let changed = false;
 
-    if (!data.version || data.version < 4) {
-        data.version = 4;
+    if (!data.version || data.version < 6) {
+        data.version = 6;
         changed = true;
     }
 
     const defaultArrays = {
+        // Canonical schema collections (see schema.js). Empty by default;
+        // populated by the evidence-ingestion pipeline. Legacy collections below
+        // remain during the migration off the prototypeCases blob.
+        ...canonicalCollectionDefaults(),
         orgs: defaultDb().orgs,
         orgUsers: createSeededUsers(),
         mobileUsers: [],
@@ -87,6 +93,7 @@ const normalizePlatformData = (data) => {
         venueCoverage: [],
         analystReviews: [],
         sourceReviews: [],
+        prototypeCases: [],
         casePackets: [],
         assets: [],
         contributors: seedContributors(),
@@ -94,12 +101,27 @@ const normalizePlatformData = (data) => {
         licenseStatus: [],
         tariffTable: seedTariffTable(),
         caseLedger: [],
-        rewardLedger: []
+        rewardLedger: [],
+        venueFingerprints: []
     };
 
     for (const [key, fallback] of Object.entries(defaultArrays)) {
         if (!Array.isArray(data[key])) {
             data[key] = ensureArray(fallback);
+            changed = true;
+        }
+    }
+
+    // Production-shaped capture store (see productionSchema.js). An object of
+    // table->array, distinct from the legacy top-level collections so it maps
+    // 1:1 onto Postgres tables later.
+    if (!data.production || typeof data.production !== 'object' || Array.isArray(data.production)) {
+        data.production = productionTableDefaults();
+        changed = true;
+    }
+    for (const [table, fallback] of Object.entries(productionTableDefaults())) {
+        if (!Array.isArray(data.production[table])) {
+            data.production[table] = fallback;
             changed = true;
         }
     }
@@ -120,7 +142,8 @@ const normalizePlatformData = (data) => {
 };
 
 const defaultDb = () => ({
-    version: 4,
+    version: 6,
+    ...canonicalCollectionDefaults(),
     orgs: [
         {
             id: 'org_platform_admin',
@@ -173,6 +196,7 @@ const defaultDb = () => ({
     venueCoverage: [],
     analystReviews: [],
     sourceReviews: [],
+    prototypeCases: [],
     casePackets: [],
     assets: [],
     contributors: seedContributors(),
@@ -180,7 +204,9 @@ const defaultDb = () => ({
     licenseStatus: [],
     tariffTable: seedTariffTable(),
     caseLedger: [],
-    rewardLedger: []
+    rewardLedger: [],
+    venueFingerprints: [],
+    production: productionTableDefaults()
 });
 
 const clone = (value) => JSON.parse(JSON.stringify(value));

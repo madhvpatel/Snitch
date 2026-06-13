@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from 'groq-sdk';
 import { getCurrentTotpCode, getTotpExpiryEpochMs, loginPortalUser, requireAuth, requirePlatformAdmin } from './platformAuth.js';
 import { loginMobileUser, requireMobileAuth, signupMobileUser, toMobileUserPublic } from './mobileAuth.js';
 import {
@@ -49,8 +49,32 @@ import {
     analyzeAudioSource,
     DEFAULT_SOURCE_CLASSIFIER_MODE,
     normalizeSourceClassifierMode,
+    toOperationalSourceLabel,
+    sourceClassSupportsVenuePlayback,
+    isNonMusicSourceClass,
 } from './sourceAnalysis.js';
+import { normalizeDeclaredContext, reconcileContext } from './captureContext.js';
+import { requestAudioDeconstructionReplicate } from './replicateDemucs.js';
 import { decodeMonoWav, encodeMonoWav, selectPeakWindows, summarizePeakWindows } from './peakFrameAnalysis.js';
+import { scoreBssidVenueMatch, scoreVenueCueMatch, normalizeBssid, canonicalVenueKey } from './venueFingerprints.js';
+import { stageToLabel, labelToStage, makeCaseEvent, CASE_EVENT_TYPE, ACTOR_TYPE } from './schema.js';
+import {
+    mirrorMobileUser,
+    mirrorDeviceInstall,
+    upsertCaptureSession as prodUpsertCaptureSession,
+    upsertVenue as prodUpsertVenue,
+    insertSubmission as prodInsertSubmission,
+    insertAsset as prodInsertAsset,
+    insertReport as prodInsertReport,
+    insertProcessingJob as prodInsertProcessingJob,
+    updateProcessingJob as prodUpdateProcessingJob,
+    updateReportFields as prodUpdateReportFields,
+    updateSubmissionFields as prodUpdateSubmissionFields,
+    findSubmission as prodFindSubmission,
+    findCaptureSession as prodFindCaptureSession,
+    findDeviceInstall as prodFindDeviceInstall,
+    getSubmissionById as prodGetSubmissionById,
+} from './productionStore.js';
 
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 const frontendDistDir = path.resolve(serverDir, '..', 'dist');
@@ -62,7 +86,237 @@ dotenv.config({ path: path.join(serverDir, '.env') });
 dotenv.config({ path: path.join(serverDir, '..', '.env') });
 
 const app = express();
+app.set('trust proxy', true);
 const upload = multer({ storage: multer.memoryStorage() });
+const clientActivityLogDir = path.join(serverDir, 'logs');
+const clientActivityLogFile = path.join(clientActivityLogDir, 'client-activity.log');
+const clientActivityLoggingEnabled = String(process.env.CLIENT_ACTIVITY_LOGGING || 'true').toLowerCase() !== 'false';
+const clientActivityConsoleEnabled = String(process.env.CLIENT_ACTIVITY_LOG_CONSOLE || 'true').toLowerCase() !== 'false';
+const clientActivityLogStatic = String(process.env.CLIENT_ACTIVITY_LOG_STATIC || '').toLowerCase() === 'true';
+const connectedClients = new Map();
+const staticAssetPattern = /\.(?:avif|css|gif|ico|jpe?g|js|map|png|svg|ttf|webp|woff2?)$/i;
+
+const trimLogValue = (value, maxLength = 180) => {
+    if (value === undefined || value === null) {
+        return null;
+    }
+
+    const text = String(value);
+    return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+};
+
+const sanitizeQueryForLog = (query = {}) => Object.fromEntries(
+    Object.entries(query)
+        .slice(0, 20)
+        .map(([key, value]) => [
+            key,
+            trimLogValue(Array.isArray(value) ? value.join(',') : value, 160),
+        ])
+);
+
+const getAuthSummary = (req) => {
+    const authorization = req.get('authorization') || '';
+    const [scheme] = authorization.split(/\s+/, 1);
+
+    return {
+        present: Boolean(authorization),
+        scheme: scheme ? scheme.toLowerCase() : null,
+    };
+};
+
+const getRouteFamily = (pathName) => {
+    if (pathName.startsWith('/api/mobile')) return 'mobile_api';
+    if (pathName.startsWith('/api/capture')) return 'legacy_capture_api';
+    if (pathName.startsWith('/api/authority-prototype')) return 'authority_prototype_api';
+    if (pathName.startsWith('/api/portal')) return 'portal_api';
+    if (pathName.startsWith('/api/admin')) return 'admin_api';
+    if (pathName.startsWith('/api/auth')) return 'auth_api';
+    if (pathName.startsWith('/api-docs')) return 'docs';
+    if (pathName.startsWith('/media')) return 'media';
+    if (pathName.startsWith('/python')) return 'python_proxy';
+    if (pathName.startsWith('/api')) return 'api';
+    if (pathName === '/' || pathName === '/authority') return 'crm_frontend';
+    return staticAssetPattern.test(pathName) ? 'static_asset' : 'frontend_route';
+};
+
+const classifyClientType = ({ pathName, routeFamily, origin, referer, userAgent }) => {
+    const combined = `${origin || ''} ${referer || ''} ${userAgent || ''}`.toLowerCase();
+
+    if (pathName.startsWith('/api/mobile') || pathName.startsWith('/api/capture')) {
+        return 'snitching_app';
+    }
+
+    if (
+        routeFamily.includes('portal')
+        || routeFamily.includes('admin')
+        || routeFamily.includes('authority')
+        || routeFamily === 'auth_api'
+        || routeFamily === 'crm_frontend'
+        || combined.includes('/authority')
+        || combined.includes('localhost:3000')
+        || combined.includes('localhost:3001')
+        || combined.includes('127.0.0.1:3000')
+        || combined.includes('127.0.0.1:3001')
+    ) {
+        return 'crm';
+    }
+
+    if (combined.includes('expo') || combined.includes('reactnative') || combined.includes('android') || combined.includes('iphone')) {
+        return 'snitching_app';
+    }
+
+    if (routeFamily === 'media') return 'media_consumer';
+    if (routeFamily === 'docs') return 'api_docs';
+    if (routeFamily === 'static_asset' || routeFamily === 'frontend_route') return 'browser_frontend';
+    return 'unknown';
+};
+
+const getClientActivityKey = ({ ip, userAgent, origin, clientId }) => stableHash([
+    ip || 'unknown-ip',
+    userAgent || 'unknown-ua',
+    origin || 'no-origin',
+    clientId || 'no-client-id',
+].join('|')).slice(0, 16);
+
+const rememberClientActivity = (entry) => {
+    const current = connectedClients.get(entry.clientKey) || {
+        clientKey: entry.clientKey,
+        firstSeenAt: entry.timestamp,
+        lastSeenAt: entry.timestamp,
+        requestCount: 0,
+        routes: {},
+        recentRequests: [],
+    };
+
+    current.lastSeenAt = entry.timestamp;
+    current.requestCount += 1;
+    current.clientType = entry.clientType;
+    current.routeFamily = entry.routeFamily;
+    current.ip = entry.ip;
+    current.origin = entry.origin;
+    current.referer = entry.referer;
+    current.userAgent = entry.userAgent;
+    current.lastMethod = entry.method;
+    current.lastPath = entry.path;
+    current.lastStatus = entry.statusCode;
+    current.lastDurationMs = entry.durationMs;
+    current.portalUser = entry.portalUser;
+    current.mobileUser = entry.mobileUser;
+    current.routes[entry.routeFamily] = (current.routes[entry.routeFamily] || 0) + 1;
+    current.recentRequests.unshift({
+        timestamp: entry.timestamp,
+        method: entry.method,
+        path: entry.path,
+        statusCode: entry.statusCode,
+        durationMs: entry.durationMs,
+    });
+    current.recentRequests = current.recentRequests.slice(0, 25);
+
+    connectedClients.set(entry.clientKey, current);
+    return current.requestCount === 1;
+};
+
+const writeClientActivityLog = (entry) => {
+    if (!clientActivityLoggingEnabled) {
+        return;
+    }
+
+    const line = `${JSON.stringify(entry)}\n`;
+    try {
+        fsSync.mkdirSync(clientActivityLogDir, { recursive: true });
+    } catch (error) {
+        console.warn('client_activity_log_dir_error', error.message);
+    }
+
+    fs.appendFile(clientActivityLogFile, line).catch((error) => {
+        console.warn('client_activity_log_write_error', error.message);
+    });
+
+    if (clientActivityConsoleEnabled) {
+        console.log('client_activity', JSON.stringify({
+            requestId: entry.requestId,
+            clientKey: entry.clientKey,
+            clientType: entry.clientType,
+            routeFamily: entry.routeFamily,
+            method: entry.method,
+            path: entry.path,
+            statusCode: entry.statusCode,
+            durationMs: entry.durationMs,
+            ip: entry.ip,
+            origin: entry.origin,
+            newClient: entry.newClient,
+        }));
+    }
+};
+
+const clientActivityLogger = (req, res, next) => {
+    const startMs = Date.now();
+    const pathName = req.path || '/';
+    const routeFamily = getRouteFamily(pathName);
+
+    if (!clientActivityLogStatic && routeFamily === 'static_asset') {
+        next();
+        return;
+    }
+
+    const origin = trimLogValue(req.get('origin'));
+    const referer = trimLogValue(req.get('referer'));
+    const userAgent = trimLogValue(req.get('user-agent'), 260);
+    const ip = trimLogValue(req.ip || req.socket?.remoteAddress || null);
+    const clientId = trimLogValue(req.get('x-snitch-client-id') || req.get('x-client-id') || req.get('x-device-id'));
+    const clientType = classifyClientType({ pathName, routeFamily, origin, referer, userAgent });
+    const clientKey = getClientActivityKey({ ip, userAgent, origin, clientId });
+    const requestId = req.get('x-request-id') || crypto.randomUUID();
+
+    res.setHeader('x-request-id', requestId);
+
+    res.on('finish', () => {
+        const durationMs = Date.now() - startMs;
+        const entry = {
+            event: 'request_finished',
+            timestamp: new Date().toISOString(),
+            requestId,
+            clientKey,
+            clientType,
+            routeFamily,
+            method: req.method,
+            path: pathName,
+            originalUrl: trimLogValue(req.originalUrl, 500),
+            query: sanitizeQueryForLog(req.query),
+            statusCode: res.statusCode,
+            durationMs,
+            responseBytes: Number(res.getHeader('content-length') || 0) || null,
+            ip,
+            forwardedFor: trimLogValue(req.get('x-forwarded-for'), 260),
+            host: trimLogValue(req.get('host')),
+            origin,
+            referer,
+            userAgent,
+            accept: trimLogValue(req.get('accept'), 260),
+            contentType: trimLogValue(req.get('content-type')),
+            contentLength: Number(req.get('content-length') || 0) || null,
+            auth: getAuthSummary(req),
+            portalUser: req.portalUser ? {
+                id: req.portalUser.id,
+                email: req.portalUser.email,
+                role: req.portalUser.role,
+                isPlatformAdmin: Boolean(req.portalUser.isPlatformAdmin),
+            } : null,
+            mobileUser: req.mobileUser ? {
+                id: req.mobileUser.id,
+                email: req.mobileUser.email,
+                trustTier: req.mobileUser.trustTier,
+            } : null,
+        };
+
+        entry.newClient = rememberClientActivity(entry);
+        writeClientActivityLog(entry);
+    });
+
+    next();
+};
+
+app.use(clientActivityLogger);
 const defaultAllowedOrigins = [
     'http://localhost:4173',
     'http://127.0.0.1:4173',
@@ -138,10 +392,10 @@ const config = {
     access_key: process.env.ACRCLOUD_ACCESS_KEY,
     access_secret: process.env.ACRCLOUD_ACCESS_SECRET,
     foursquare_key: process.env.FOURSQUARE_SERVICE_KEY,
-    gemini_key: process.env.GEMINI_API_KEY,
+    groq_key: process.env.GROQ_API_KEY,
     google_places_key: process.env.GOOGLE_PLACES_API_KEY
 };
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct';
 const CAPTURE_POLICY = {
     minSeconds: 15,
     maxSeconds: 20,
@@ -156,7 +410,7 @@ const FINGERPRINT_MAX_ATTEMPTS = 8;
 const FINGERPRINT_MIN_SPACING_SECONDS = 3.2;
 const FINGERPRINT_VOCAL_PENALTY_WEIGHT = 4;
 const FINGERPRINT_WINDOW_RETRY_ATTEMPTS = 2;
-const GEMINI_TIMEOUT_MS = 20000;
+const AI_TIMEOUT_MS = 20000;
 
 if (isMainModule) {
     console.log('🔐 ACRCloud Configuration:');
@@ -293,7 +547,7 @@ Known context:
 - Peak windows: ${summarizePeakWindows(peakWindows).join(', ') || 'unknown'}
 - Matched song: ${song?.title ? `${song.title} - ${song.artist || 'Unknown Artist'}` : 'unknown'}
 - Matched venue: ${venue?.name || 'unknown'}
-- Audio source classifier: ${sourceAnalysis?.sourceClass || 'inconclusive'} (${sourceAnalysis?.confidence != null ? `${Math.round(Number(sourceAnalysis.confidence) * 100)}% confidence` : 'n/a'})
+- Audio source classifier: ${sourceAnalysis?.operationalLabel || toOperationalSourceLabel(sourceAnalysis?.sourceClass)} (${sourceAnalysis?.confidence != null ? `${Math.round(Number(sourceAnalysis.confidence) * 100)}% confidence` : 'n/a'})
 
 Look for:
 - installed PA speakers, ceiling speakers, compact wall-mounted cafe speakers, DJ booth, mixer, stage, mic setup
@@ -426,9 +680,9 @@ const buildHealthPayload = async () => ({
             required: false,
             configured: Boolean(config.foursquare_key)
         },
-        gemini: {
+        groq: {
             required: false,
-            configured: Boolean(config.gemini_key)
+            configured: Boolean(config.groq_key)
         },
         google_places: {
             required: false,
@@ -837,7 +1091,7 @@ async function resolveSongIdentity(audioBuffer, uploadMeta = {}) {
     const needsLabel = !response.label || response.label === 'Unknown Label';
     const needsPRO = !response.rights_org;
 
-    if ((needsLabel || needsPRO) && config.gemini_key) {
+    if ((needsLabel || needsPRO) && config.groq_key) {
         try {
             const aiMetadata = await enrichMetadataWithAI(response.title, response.artist);
             if (needsLabel && aiMetadata?.label) {
@@ -1342,31 +1596,29 @@ const loadHistoricalStemJobs = async ({ data, submissionId }) => {
 
 async function enrichMetadataWithAI(title, artist) {
     try {
-        const genAI = new GoogleGenerativeAI(config.gemini_key);
-        const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+        const groq = new Groq({ apiKey: config.groq_key });
+        const prompt = `Identified Song: "${title}" by "${artist}".
+I need the record label and the primary performing rights organization for this song.
 
-        const prompt = `
-        Identified Song: "${title}" by "${artist}".
-        I need the record label and the primary performing rights organization for this song.
+Return STRICT JSON only (no markdown, no explanation):
+{"label": "Record label or null", "rights_org": "PRO acronym like ASCAP, BMI, SESAC, GMR, PRS, or GEMA, or null"}`;
 
-        Return STRICT JSON only:
-        {
-            "label": "Record label or null",
-            "rights_org": "PRO acronym like ASCAP, BMI, SESAC, GMR, PRS, or GEMA, or null"
-        }
-        `;
-
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const text = response.text().replace(/```json|```/g, '').trim();
+        const completion = await withTimeout(
+            groq.chat.completions.create({
+                model: GROQ_MODEL,
+                messages: [{ role: 'user', content: prompt }],
+            }),
+            AI_TIMEOUT_MS,
+            'metadata enrichment',
+        );
+        const text = completion.choices[0].message.content.replace(/```json|```/g, '').trim();
         const parsed = JSON.parse(text);
-
         return {
             label: parsed.label || null,
-            rights_org: normalizeRightsOrg(parsed.rights_org)
+            rights_org: normalizeRightsOrg(parsed.rights_org),
         };
     } catch (error) {
-        console.error("AI Help Error:", error);
+        console.error('AI metadata enrichment error:', error);
         return null;
     }
 }
@@ -1387,42 +1639,55 @@ const withTimeout = async (promise, timeoutMs, label) => {
     }
 };
 
-const generateGeminiText = async ({ parts, label }) => {
-    const genAI = new GoogleGenerativeAI(config.gemini_key);
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-    const result = await withTimeout(model.generateContent(parts), GEMINI_TIMEOUT_MS, label);
-    const response = await withTimeout(result.response, GEMINI_TIMEOUT_MS, `${label} response`);
-    return response.text().trim();
+// Build an OpenAI-compatible content array for Groq from a list of parts.
+// Each part is either { text } or { inlineData: { data, mimeType } }.
+// Audio inlineData is skipped — Groq vision models don't support inline audio.
+const buildGroqContent = (parts) => {
+    const content = [];
+    for (const part of parts) {
+        if (part.text !== undefined) {
+            content.push({ type: 'text', text: part.text });
+        } else if (part.inlineData) {
+            const { mimeType, data } = part.inlineData;
+            if (mimeType.startsWith('image/')) {
+                content.push({ type: 'image_url', image_url: { url: `data:${mimeType};base64,${data}` } });
+            }
+            // audio inlineData intentionally dropped — not supported
+        }
+    }
+    return content;
 };
 
-async function generateForensicReport({ audioBuffer, audioMimeType, frameDataUrl, mode, peakTime }) {
-    const prompt = buildForensicPrompt({
-        mode,
-        peakTime,
-        hasFrame: Boolean(frameDataUrl)
-    });
+// jsonMode: true forces Groq to return a valid JSON object (no markdown/prose).
+// Use for all calls where we parseModelJson the result.
+const generateAIText = async ({ parts, label, jsonMode = false }) => {
+    const groq = new Groq({ apiKey: config.groq_key });
+    const content = buildGroqContent(parts);
+    const createParams = {
+        model: GROQ_MODEL,
+        messages: [
+            ...(jsonMode ? [{ role: 'system', content: 'You are a JSON-only response assistant. Return only a valid JSON object. No markdown, no explanation, no text outside the JSON.' }] : []),
+            { role: 'user', content },
+        ],
+        ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
+    };
+    const completion = await withTimeout(
+        groq.chat.completions.create(createParams),
+        AI_TIMEOUT_MS,
+        label,
+    );
+    return completion.choices[0].message.content.trim();
+};
 
-    const parts = [
-        {
-            inlineData: {
-                data: audioBuffer.toString('base64'),
-                mimeType: audioMimeType || 'audio/wav'
-            }
-        },
-        { text: prompt }
-    ];
-
+async function generateForensicReport({ frameDataUrl, mode, peakTime }) {
+    const prompt = buildForensicPrompt({ mode, peakTime, hasFrame: Boolean(frameDataUrl) });
+    const parts = [];
     const inlineFrame = parseInlineDataUrl(frameDataUrl);
     if (inlineFrame) {
-        parts.unshift({
-            inlineData: {
-                data: inlineFrame.data,
-                mimeType: inlineFrame.mimeType
-            }
-        });
+        parts.push({ inlineData: { data: inlineFrame.data, mimeType: inlineFrame.mimeType } });
     }
-
-    return generateGeminiText({ parts, label: 'forensic report generation' });
+    parts.push({ text: prompt });
+    return generateAIText({ parts, label: 'forensic report generation' });
 }
 
 async function generateVisualEvidenceAssessment({ frames = [], peakWindows = [], song, venue, sourceAnalysis }) {
@@ -1430,28 +1695,15 @@ async function generateVisualEvidenceAssessment({ frames = [], peakWindows = [],
         return null;
     }
 
-    const prompt = buildVisualAnalysisPrompt({
-        peakWindows,
-        song,
-        venue,
-        sourceAnalysis
-    });
-
+    const prompt = buildVisualAnalysisPrompt({ peakWindows, song, venue, sourceAnalysis });
     const parts = [];
     frames.forEach((frame, index) => {
-        parts.push({
-            text: `Frame ${index + 1} was captured at ${frame.timestampSeconds.toFixed(2)} seconds.`
-        });
-        parts.push({
-            inlineData: {
-                data: frame.buffer.toString('base64'),
-                mimeType: frame.mimeType || 'image/jpeg'
-            }
-        });
+        parts.push({ text: `Frame ${index + 1} was captured at ${frame.timestampSeconds.toFixed(2)} seconds.` });
+        parts.push({ inlineData: { data: frame.buffer.toString('base64'), mimeType: frame.mimeType || 'image/jpeg' } });
     });
     parts.push({ text: prompt });
 
-    const text = await generateGeminiText({ parts, label: 'visual evidence assessment' });
+    const text = await generateAIText({ parts, label: 'visual evidence assessment', jsonMode: true });
     return sanitizeVisualAnalysis(parseModelJson(text), peakWindows);
 }
 
@@ -1546,6 +1798,13 @@ const fetchBinaryPayload = async (url) => {
 };
 
 const requestAudioDeconstruction = async ({ audioBuffer, fileName = 'input.wav', mimeType = 'audio/wav' }) => {
+    // DEMUCS_BACKEND=replicate routes stem separation to Replicate-hosted Demucs
+    // (no local Python service needed). Default is the self-hosted backend, which
+    // can also be pointed at a tunnel to a local box via PYTHON_AI_BASE_URL.
+    if ((process.env.DEMUCS_BACKEND || 'local').toLowerCase() === 'replicate') {
+        return requestAudioDeconstructionReplicate({ audioBuffer, fileName, mimeType });
+    }
+
     const formData = new FormData();
     formData.append('audio', audioBuffer, {
         filename: fileName,
@@ -2082,8 +2341,8 @@ app.get('/api/nearby-venues', async (req, res) => {
 
 app.post('/api/forensic-report', upload.fields([{ name: 'audio', maxCount: 1 }]), async (req, res) => {
     try {
-        if (!config.gemini_key) {
-            return res.status(503).json({ error: 'Gemini API key is not configured on the server' });
+        if (!config.groq_key) {
+            return res.status(503).json({ error: 'AI API key is not configured on the server' });
         }
 
         const audioFile = req.files?.audio?.[0];
@@ -2092,8 +2351,6 @@ app.post('/api/forensic-report', upload.fields([{ name: 'audio', maxCount: 1 }])
         }
 
         const report = await generateForensicReport({
-            audioBuffer: audioFile.buffer,
-            audioMimeType: audioFile.mimetype,
             frameDataUrl: req.body.frame_data_url,
             mode: req.body.mode || 'detail',
             peakTime: Number(req.body.peak_time || 0)
@@ -2194,6 +2451,26 @@ const buildSignedFinalizePayload = (payload) => ({
     measuredEndOffsetMs: payload.measuredEndOffsetMs,
     durationSeconds: payload.durationSeconds,
     geolocationEnd: payload.geolocationEnd
+});
+
+// Canonical payload the SnitchV1 mobile client signs at finalize. Every value is
+// a string (or null) so client and server canonicalize byte-for-byte identically
+// without float→string ambiguity. sessionNonce is server-issued per session and
+// binds the signature to this capture session (replay protection). Key set MUST
+// match the client's `signed` object in upload-progress.tsx.
+const buildMobileSignedFinalizePayload = (payload) => ({
+    installId: payload.installId ?? null,
+    deviceKeyId: payload.deviceKeyId ?? null,
+    sessionId: payload.sessionId ?? null,
+    sessionNonce: payload.sessionNonce ?? null,
+    mediaSha256: payload.mediaSha256 ?? null,
+    localStartTime: payload.localStartTime ?? null,
+    localEndTime: payload.localEndTime ?? null,
+    durationSeconds: payload.durationSeconds ?? null,
+    startLat: payload.startLat ?? null,
+    startLng: payload.startLng ?? null,
+    endLat: payload.endLat ?? null,
+    endLng: payload.endLng ?? null,
 });
 
 const cleanString = (value) => (value || '').trim().toLowerCase();
@@ -2419,7 +2696,7 @@ const buildFallbackVisualAnalysis = ({ peakWindows = [], sourceAnalysis, frames 
     frameObservations: peakWindows.map((window) => ({
         timestampSeconds: window.timestampSeconds,
         observation: sourceAnalysis?.sourceClass
-            ? `Frame captured at a higher-energy window while audio source scoring remained ${sourceAnalysis.sourceClass.replaceAll('_', ' ')}.`
+            ? `Frame captured at a higher-energy window while audio source scoring remained ${sourceAnalysis.operationalLabel || toOperationalSourceLabel(sourceAnalysis.sourceClass)}.`
             : 'Frame captured at a higher-energy window for manual review.'
     })),
     modelVersion: 'visual-v1-fallback',
@@ -3156,415 +3433,639 @@ const buildReportTargets = (data, song, venue) => {
     return [...deduped.values()];
 };
 
-const processSubmission = async (submissionId) => {
+// Core evidence pipeline shared by both legacy and v2 processing paths.
+// Accepts a resolved rawAssetPath + metadata; returns all computed signals.
+// Caller is responsible for: hash verification, venue resolution, and final writes.
+const runEvidencePipeline = async ({
+    rawAssetPath,
+    reference,
+    submissionId,
+    data,
+    durationSeconds,
+    measuredStartOffsetMs,
+    measuredEndOffsetMs,
+    sourceClassifierMode,
+    bestSongIdentity: initialBestSongIdentity,
+    venue,
+}) => {
+    const audioBuffer = await extractAudioFromFile(rawAssetPath);
+    let analysisAudioBuffer = audioBuffer;
+    let analysisStem = null;
+    let fingerprintStem = null;
+    let audioDeconstruction = null;
+    let deconstructionResult = null;
+    let savedStemAssets = {};
+    let audioDeconstructionError = null;
+    let selectedIsolationPass = 'raw_only';
+    let currentFingerprintRun = null;
+    let historicalFingerprintRun = null;
+    let historicalJobCount = 0;
+    let allFingerprintAttempts = [];
+    let allFingerprintCandidates = [];
+
+    try {
+        const isolationPasses = buildIsolationPasses({ audioBuffer, reference });
+        let firstDeconstructionError = null;
+
+        for (const pass of isolationPasses) {
+            try {
+                const passDeconstruction = await requestAudioDeconstruction({
+                    audioBuffer: pass.audioBuffer,
+                    fileName: pass.fileName,
+                    mimeType: 'audio/wav',
+                });
+                let passRun = {
+                    result: { ok: false },
+                    matchedCandidate: null,
+                    attempts: [],
+                    candidates: [],
+                    fingerprintStem: null,
+                    sourceType: 'current',
+                    passLabel: pass.label,
+                    jobId: passDeconstruction.jobId || null,
+                };
+
+                if (config.host && config.access_key && config.access_secret) {
+                    passRun = await evaluateFingerprintRun({
+                        audioBuffer,
+                        reference,
+                        deconstructionResult: passDeconstruction,
+                        includeRawSource: true,
+                        sourceType: 'current',
+                        passLabel: pass.label,
+                    });
+                }
+
+                passRun.deconstructionResult = passDeconstruction;
+                allFingerprintAttempts.push(...passRun.attempts);
+                allFingerprintCandidates.push(...passRun.candidates);
+                currentFingerprintRun = pickBetterFingerprintRun(currentFingerprintRun, passRun);
+            } catch (error) {
+                if (!firstDeconstructionError) {
+                    firstDeconstructionError = error;
+                }
+            }
+        }
+
+        if (currentFingerprintRun?.deconstructionResult) {
+            deconstructionResult = currentFingerprintRun.deconstructionResult;
+            selectedIsolationPass = currentFingerprintRun.passLabel || 'original';
+            savedStemAssets = await saveStemAssetsFromDeconstruction({
+                submissionId,
+                reference,
+                deconstructionResult,
+            });
+
+            if (deconstructionResult.preferredStem && deconstructionResult.stems[deconstructionResult.preferredStem]) {
+                analysisStem = deconstructionResult.preferredStem;
+                analysisAudioBuffer = deconstructionResult.stems[analysisStem].buffer;
+            }
+        } else if (firstDeconstructionError) {
+            throw firstDeconstructionError;
+        }
+    } catch (error) {
+        audioDeconstructionError = error.message;
+        console.warn('Audio deconstruction unavailable:', error.message);
+    }
+
+    const peakWindows = selectPeakWindows(analysisAudioBuffer);
+    let sourceAnalysis = null;
+    try {
+        sourceAnalysis = analyzeAudioSource(audioBuffer, { mode: sourceClassifierMode || DEFAULT_SOURCE_CLASSIFIER_MODE });
+    } catch (error) {
+        console.warn('Audio source analysis failed:', error.message);
+    }
+
+    const extractedFrames = await extractPeakFramesFromVideo(rawAssetPath, peakWindows);
+    const representativeFrameDataUrl = extractedFrames[0]
+        ? bufferToDataUrl(extractedFrames[0].buffer, extractedFrames[0].mimeType)
+        : null;
+
+    const audioAsset = await saveAsset({
+        buffer: audioBuffer,
+        fileName: `${reference}.wav`,
+        mimeType: 'audio/wav',
+        kind: 'derived-audio',
+        metadata: { submissionId },
+    });
+
+    const frameAssets = await Promise.all(extractedFrames.map((frame) => saveAsset({
+        buffer: frame.buffer,
+        fileName: `${reference}-peak-${frame.rank}.jpg`,
+        mimeType: frame.mimeType,
+        kind: 'video-frame',
+        metadata: {
+            submissionId,
+            timestampSeconds: frame.timestampSeconds,
+            peakRank: frame.rank,
+            relativeIntensity: frame.relativeIntensity,
+        },
+    })));
+
+    let songIdentity = { ok: false };
+    let songIdentityCandidates = allFingerprintCandidates;
+    let songIdentityAttempts = allFingerprintAttempts;
+    let bestSongIdentityRecord = initialBestSongIdentity || null;
+    let chosenFingerprintRun = currentFingerprintRun;
+
+    if (config.host && config.access_key && config.access_secret) {
+        if (!chosenFingerprintRun) {
+            const rawFallbackRun = await evaluateFingerprintRun({
+                audioBuffer,
+                reference,
+                deconstructionResult: null,
+                includeRawSource: true,
+                sourceType: 'raw_fallback',
+                passLabel: 'raw_fallback',
+            });
+            chosenFingerprintRun = rawFallbackRun;
+            allFingerprintAttempts.push(...rawFallbackRun.attempts);
+            allFingerprintCandidates.push(...rawFallbackRun.candidates);
+            songIdentityCandidates = rawFallbackRun.candidates;
+            songIdentityAttempts = rawFallbackRun.attempts;
+        }
+
+        if (!chosenFingerprintRun?.result?.ok) {
+            const historicalStemJobs = await loadHistoricalStemJobs({ data, submissionId });
+            historicalJobCount = historicalStemJobs.length;
+            for (const historicalJob of historicalStemJobs) {
+                const historicalRun = await evaluateFingerprintRun({
+                    audioBuffer,
+                    reference,
+                    deconstructionResult: historicalJob,
+                    includeRawSource: false,
+                    sourceType: 'historical',
+                    passLabel: historicalJob.jobId || 'historical',
+                });
+                allFingerprintAttempts.push(...historicalRun.attempts);
+                historicalFingerprintRun = pickBetterFingerprintRun(historicalFingerprintRun, historicalRun);
+            }
+        }
+
+        chosenFingerprintRun = pickBetterFingerprintRun(chosenFingerprintRun, historicalFingerprintRun);
+        songIdentity = chosenFingerprintRun?.result || { ok: false };
+        songIdentityCandidates = currentFingerprintRun?.candidates || songIdentityCandidates;
+        songIdentityAttempts = allFingerprintAttempts;
+        if (chosenFingerprintRun?.matchedCandidate) {
+            fingerprintStem = chosenFingerprintRun.matchedCandidate.stem === 'raw'
+                ? null
+                : chosenFingerprintRun.matchedCandidate.stem;
+        }
+
+        if (chosenFingerprintRun?.result?.ok) {
+            bestSongIdentityRecord = pickBetterBestSongIdentityRecord(
+                bestSongIdentityRecord,
+                buildBestSongIdentityRecord({
+                    song: chosenFingerprintRun.result.data,
+                    matchedCandidate: chosenFingerprintRun.matchedCandidate,
+                    sourceType: chosenFingerprintRun.sourceType,
+                    jobId: chosenFingerprintRun.jobId,
+                    passLabel: chosenFingerprintRun.passLabel,
+                }),
+            );
+        }
+
+        if (!songIdentity.ok && bestSongIdentityRecord?.song?.title) {
+            songIdentity = { ok: true, data: bestSongIdentityRecord.song };
+            fingerprintStem = bestSongIdentityRecord?.matchedCandidate?.stem === 'raw'
+                ? null
+                : (bestSongIdentityRecord?.matchedCandidate?.stem || fingerprintStem);
+        }
+    }
+
+    const song = songIdentity.ok ? songIdentity.data : null;
+    audioDeconstruction = buildAudioDeconstructionRecord({
+        attempted: Boolean(deconstructionResult || audioDeconstructionError),
+        deconstruction: deconstructionResult,
+        savedStemAssets,
+        fingerprintStem,
+        peakSelectionStem: analysisStem,
+        fingerprintCandidates: songIdentityCandidates,
+        fingerprintAttempts: songIdentityAttempts,
+        error: audioDeconstructionError,
+        summaryOverride: deconstructionResult
+            ? `Demucs ${selectedIsolationPass} pass separated ${Object.keys(savedStemAssets).join(', ')}. ${analysisStem ? `${analysisStem} was used for peak selection. ` : ''}${fingerprintStem ? `${fingerprintStem} produced the strongest fingerprint result. ` : 'No current-pass fingerprint resolved cleanly. '}${historicalJobCount ? `${historicalJobCount} historical stem job(s) were also checked.` : ''}`.trim()
+            : null,
+    });
+
+    const submissionForFallback = { durationSeconds, measuredStartOffsetMs, measuredEndOffsetMs };
+    const forensicSummary = config.groq_key
+        ? await generateForensicReport({
+            mode: 'summary',
+            peakTime: peakWindows[0]?.timestampSeconds ?? durationSeconds / 2,
+            frameDataUrl: representativeFrameDataUrl,
+        }).catch(() => buildFallbackForensicSummary(song, submissionForFallback))
+        : buildFallbackForensicSummary(song, submissionForFallback);
+
+    const visualAnalysis = config.groq_key
+        ? await generateVisualEvidenceAssessment({
+            frames: extractedFrames,
+            peakWindows,
+            song,
+            venue,
+            sourceAnalysis,
+        }).catch(() => buildFallbackVisualAnalysis({ peakWindows, sourceAnalysis, frames: extractedFrames }))
+        : buildFallbackVisualAnalysis({ peakWindows, sourceAnalysis, frames: extractedFrames });
+
+    return {
+        song,
+        audioBuffer,
+        audioDeconstruction,
+        audioAsset,
+        frameAssets,
+        extractedFrames,
+        representativeFrameDataUrl,
+        sourceAnalysis,
+        peakWindows,
+        forensicSummary,
+        visualAnalysis,
+        bestSongIdentityRecord,
+        songIdentityAttempts,
+    };
+};
+
+// ─── Phase 1: Quick ID (runs at submit, light) ───
+// A SINGLE ACRCloud pass on the raw extracted audio — just enough to show the
+// snitcher the track + who owns it. No Demucs, source/visual/application
+// analysis, or reconciliation (that is Phase 2, deferred). Sets the submission
+// to 'identified' (song found) or 'needs_advanced' (the quick pass couldn't
+// decode it — advanced techniques required later).
+const quickIdentifySubmission = async (submissionId) => {
     if (processingSubmissions.has(submissionId)) {
         return;
     }
-
     processingSubmissions.add(submissionId);
 
+    let jobId = null;
     try {
-        await mutatePlatformData((data) => {
-            const submission = data.submissions.find((item) => item.id === submissionId);
-            if (submission) {
-                submission.status = 'processing';
-                submission.processingStartedAt = new Date().toISOString();
+        await mutatePlatformData((draft) => {
+            const sub = prodFindSubmission(draft, submissionId);
+            if (sub) {
+                sub.status = 'identifying';
+                sub.updated_at = new Date().toISOString();
             }
+            const job = prodInsertProcessingJob(draft, {
+                submission_id: submissionId,
+                job_type: 'quick_id',
+                provider: 'acrcloud',
+                status: 'running',
+                started_at: new Date().toISOString(),
+            });
+            jobId = job.id;
         });
 
         const data = await readPlatformData();
-        const submission = data.submissions.find((item) => item.id === submissionId);
+        const submission = prodFindSubmission(data, submissionId);
         if (!submission) {
-            throw new Error('Submission not found');
+            throw new Error('V2 submission not found');
         }
-
-        const rawAsset = await ensureAssetRecord({
-            assetId: submission.rawVideoAssetId,
-            kind: 'raw-video',
-            fileName: submission.fileName,
-            mimeType: submission.uploadedMimeType || submission.mimeType,
-            metadata: { submissionId }
-        });
-        const rawAssetPath = await getAssetAbsolutePath(submission.rawVideoAssetId);
-        if (!rawAsset || !rawAssetPath) {
-            throw new Error('Raw video asset missing');
+        const rawAssetRow = data.production?.assets?.find((a) => a.id === submission.raw_video_asset_id) || null;
+        if (!rawAssetRow?.object_key) {
+            throw new Error('Raw video asset missing from production store');
         }
+        const rawAssetPath = path.join(MEDIA_DIR, rawAssetRow.object_key);
 
-        // Verify the uploaded file matches the hash the client committed to at finalize.
-        if (submission.mediaSha256) {
+        // Hash integrity check (cheap, keep it on the fast path).
+        if (submission.media_sha256) {
             const rawFileBuffer = await fs.readFile(rawAssetPath);
             const computedHash = crypto.createHash('sha256').update(rawFileBuffer).digest('hex');
-            if (computedHash !== submission.mediaSha256) {
-                await mutatePlatformData((data) => {
-                    const s = data.submissions.find((item) => item.id === submissionId);
-                    if (s) {
-                        s.integrityFlag = 'hash_mismatch';
-                        s.integrityComputedHash = computedHash;
-                    }
+            if (computedHash !== submission.media_sha256) {
+                await mutatePlatformData((draft) => {
+                    prodUpdateSubmissionFields(draft, submissionId, { status: 'failed', integrity_flag: 'hash_mismatch' });
+                    if (jobId) prodUpdateProcessingJob(draft, jobId, { status: 'failed', error_message: 'hash_mismatch', finished_at: new Date().toISOString() });
                 });
-                throw new Error(`Media integrity check failed: hash mismatch (expected ${submission.mediaSha256.slice(0, 12)}…)`);
+                throw new Error('Media integrity check failed: hash mismatch');
             }
         }
 
+        // Extract audio in-memory and run ONE ACRCloud pass on the raw audio.
         const audioBuffer = await extractAudioFromFile(rawAssetPath);
-        let analysisAudioBuffer = audioBuffer;
-        let analysisAudioFileName = `${submission.reference}.wav`;
-        let analysisStem = null;
-        let fingerprintStem = null;
-        let audioDeconstruction = null;
-        let deconstructionResult = null;
-        let savedStemAssets = {};
-        let audioDeconstructionError = null;
-        let selectedIsolationPass = 'raw_only';
-        let currentFingerprintRun = null;
-        let historicalFingerprintRun = null;
-        let historicalJobCount = 0;
-        let allFingerprintAttempts = [];
-        let allFingerprintCandidates = [];
+        const acrConfigured = Boolean(config.host && config.access_key && config.access_secret);
+        const songResult = acrConfigured
+            ? await resolveSongIdentity(audioBuffer, { filename: `${submission.reference}.wav`, contentType: 'audio/wav' })
+                .catch((err) => ({ ok: false, error: err.message }))
+            : { ok: false, error: 'ACRCloud not configured' };
+        const song = songResult.ok ? songResult.data : null;
 
-        try {
-            const isolationPasses = buildIsolationPasses({
-                audioBuffer,
-                reference: submission.reference,
-            });
-            let firstDeconstructionError = null;
-
-            for (const pass of isolationPasses) {
-                try {
-                    const passDeconstruction = await requestAudioDeconstruction({
-                        audioBuffer: pass.audioBuffer,
-                        fileName: pass.fileName,
-                        mimeType: 'audio/wav',
-                    });
-                    let passRun = {
-                        result: { ok: false },
-                        matchedCandidate: null,
-                        attempts: [],
-                        candidates: [],
-                        fingerprintStem: null,
-                        sourceType: 'current',
-                        passLabel: pass.label,
-                        jobId: passDeconstruction.jobId || null,
-                    };
-
-                    if (config.host && config.access_key && config.access_secret) {
-                        passRun = await evaluateFingerprintRun({
-                            audioBuffer,
-                            reference: submission.reference,
-                            deconstructionResult: passDeconstruction,
-                            includeRawSource: true,
-                            sourceType: 'current',
-                            passLabel: pass.label,
-                        });
-                    }
-
-                    passRun.deconstructionResult = passDeconstruction;
-                    allFingerprintAttempts.push(...passRun.attempts);
-                    allFingerprintCandidates.push(...passRun.candidates);
-                    currentFingerprintRun = pickBetterFingerprintRun(currentFingerprintRun, passRun);
-                } catch (error) {
-                    if (!firstDeconstructionError) {
-                        firstDeconstructionError = error;
-                    }
-                }
-            }
-
-            if (currentFingerprintRun?.deconstructionResult) {
-                deconstructionResult = currentFingerprintRun.deconstructionResult;
-                selectedIsolationPass = currentFingerprintRun.passLabel || 'original';
-                savedStemAssets = await saveStemAssetsFromDeconstruction({
-                    submissionId,
-                    reference: submission.reference,
-                    deconstructionResult,
-                });
-
-                if (deconstructionResult.preferredStem && deconstructionResult.stems[deconstructionResult.preferredStem]) {
-                    analysisStem = deconstructionResult.preferredStem;
-                    analysisAudioBuffer = deconstructionResult.stems[analysisStem].buffer;
-                    analysisAudioFileName = `${submission.reference}-${analysisStem}.wav`;
-                }
-            } else if (firstDeconstructionError) {
-                throw firstDeconstructionError;
-            }
-        } catch (error) {
-            audioDeconstructionError = error.message;
-            console.warn('Audio deconstruction unavailable:', error.message);
-        }
-
-        const peakWindows = selectPeakWindows(analysisAudioBuffer);
-        let sourceAnalysis = null;
-        try {
-            sourceAnalysis = analyzeAudioSource(audioBuffer, {
-                mode: submission.sourceClassifierMode || DEFAULT_SOURCE_CLASSIFIER_MODE,
-            });
-        } catch (error) {
-            console.warn('Audio source analysis failed:', error.message);
-        }
-
-        const extractedFrames = await extractPeakFramesFromVideo(rawAssetPath, peakWindows);
-        const representativeFrameDataUrl = extractedFrames[0]
-            ? bufferToDataUrl(extractedFrames[0].buffer, extractedFrames[0].mimeType)
-            : null;
-
-        const audioAsset = await saveAsset({
-            buffer: audioBuffer,
-            fileName: `${submission.reference}.wav`,
-            mimeType: 'audio/wav',
-            kind: 'derived-audio',
-            metadata: { submissionId }
-        });
-
-        const frameAssets = await Promise.all(extractedFrames.map((frame) => saveAsset({
-            buffer: frame.buffer,
-            fileName: `${submission.reference}-peak-${frame.rank}.jpg`,
-            mimeType: frame.mimeType,
-            kind: 'video-frame',
-            metadata: {
-                submissionId,
-                timestampSeconds: frame.timestampSeconds,
-                peakRank: frame.rank,
-                relativeIntensity: frame.relativeIntensity,
-            }
-        })));
-
-        let songIdentity = { ok: false };
-        let songIdentityCandidates = allFingerprintCandidates;
-        let songIdentityAttempts = allFingerprintAttempts;
-        let bestSongIdentityRecord = submission.bestSongIdentity || null;
-        let chosenFingerprintRun = currentFingerprintRun;
-        if (config.host && config.access_key && config.access_secret) {
-            if (!chosenFingerprintRun) {
-                const rawFallbackRun = await evaluateFingerprintRun({
-                    audioBuffer,
-                    reference: submission.reference,
-                    deconstructionResult: null,
-                    includeRawSource: true,
-                    sourceType: 'raw_fallback',
-                    passLabel: 'raw_fallback',
-                });
-                chosenFingerprintRun = rawFallbackRun;
-                allFingerprintAttempts.push(...rawFallbackRun.attempts);
-                allFingerprintCandidates.push(...rawFallbackRun.candidates);
-                songIdentityCandidates = rawFallbackRun.candidates;
-                songIdentityAttempts = rawFallbackRun.attempts;
-            }
-
-            if (!chosenFingerprintRun?.result?.ok) {
-                const historicalStemJobs = await loadHistoricalStemJobs({ data, submissionId });
-                historicalJobCount = historicalStemJobs.length;
-                for (const historicalJob of historicalStemJobs) {
-                    const historicalRun = await evaluateFingerprintRun({
-                        audioBuffer,
-                        reference: submission.reference,
-                        deconstructionResult: historicalJob,
-                        includeRawSource: false,
-                        sourceType: 'historical',
-                        passLabel: historicalJob.jobId || 'historical',
-                    });
-                    allFingerprintAttempts.push(...historicalRun.attempts);
-                    historicalFingerprintRun = pickBetterFingerprintRun(historicalFingerprintRun, historicalRun);
-                }
-            }
-
-            chosenFingerprintRun = pickBetterFingerprintRun(chosenFingerprintRun, historicalFingerprintRun);
-            songIdentity = chosenFingerprintRun?.result || { ok: false };
-            songIdentityCandidates = currentFingerprintRun?.candidates || songIdentityCandidates;
-            songIdentityAttempts = allFingerprintAttempts;
-            if (chosenFingerprintRun?.matchedCandidate) {
-                fingerprintStem = chosenFingerprintRun.matchedCandidate.stem === 'raw'
-                    ? null
-                    : chosenFingerprintRun.matchedCandidate.stem;
-            }
-
-            if (chosenFingerprintRun?.result?.ok) {
-                bestSongIdentityRecord = pickBetterBestSongIdentityRecord(
-                    bestSongIdentityRecord,
-                    buildBestSongIdentityRecord({
-                        song: chosenFingerprintRun.result.data,
-                        matchedCandidate: chosenFingerprintRun.matchedCandidate,
-                        sourceType: chosenFingerprintRun.sourceType,
-                        jobId: chosenFingerprintRun.jobId,
-                        passLabel: chosenFingerprintRun.passLabel,
-                    })
-                );
-            }
-
-            if (!songIdentity.ok && bestSongIdentityRecord?.song?.title) {
-                songIdentity = {
-                    ok: true,
-                    data: bestSongIdentityRecord.song,
-                };
-                fingerprintStem = bestSongIdentityRecord?.matchedCandidate?.stem === 'raw'
-                    ? null
-                    : (bestSongIdentityRecord?.matchedCandidate?.stem || fingerprintStem);
-            }
-        }
-
-        const song = songIdentity.ok ? songIdentity.data : null;
-        audioDeconstruction = buildAudioDeconstructionRecord({
-            attempted: Boolean(deconstructionResult || audioDeconstructionError),
-            deconstruction: deconstructionResult,
-            savedStemAssets,
-            fingerprintStem,
-            peakSelectionStem: analysisStem,
-            fingerprintCandidates: songIdentityCandidates,
-            fingerprintAttempts: songIdentityAttempts,
-            error: audioDeconstructionError,
-            summaryOverride: deconstructionResult
-                ? `Demucs ${selectedIsolationPass} pass separated ${Object.keys(savedStemAssets).join(', ')}. ${analysisStem ? `${analysisStem} was used for peak selection. ` : ''}${fingerprintStem ? `${fingerprintStem} produced the strongest fingerprint result. ` : 'No current-pass fingerprint resolved cleanly. '}${historicalJobCount ? `${historicalJobCount} historical stem job(s) were also checked.` : ''}`.trim()
-                : null,
-        });
-        const venue = await upsertVenue(submission.geolocationEnd || submission.geolocationStart, submission.selectedVenue || null);
-        const forensicSummary = config.gemini_key
-            ? await generateForensicReport({
-                audioBuffer,
-                audioMimeType: 'audio/wav',
-                mode: 'summary',
-                peakTime: peakWindows[0]?.timestampSeconds ?? submission.durationSeconds / 2,
-                frameDataUrl: representativeFrameDataUrl,
-            }).catch(() => buildFallbackForensicSummary(song, submission))
-            : buildFallbackForensicSummary(song, submission);
-        const visualAnalysis = config.gemini_key
-            ? await generateVisualEvidenceAssessment({
-                frames: extractedFrames,
-                peakWindows,
-                song,
-                venue,
-                sourceAnalysis,
-            }).catch(() => buildFallbackVisualAnalysis({ peakWindows, sourceAnalysis, frames: extractedFrames }))
-            : buildFallbackVisualAnalysis({ peakWindows, sourceAnalysis, frames: extractedFrames });
-
-        await mutatePlatformData(async (draft) => {
-            const submissionRecord = draft.submissions.find((item) => item.id === submissionId);
-            const install = draft.anonymousInstalls.find((item) => item.installId === submissionRecord.installId);
-            const targets = buildReportTargets(draft, song, venue);
-            const contributor = install?.contributorId
-                ? draft.contributors.find((item) => item.id === install.contributorId) || null
-                : null;
+        await mutatePlatformData((draft) => {
             const reportCreatedAt = new Date().toISOString();
-            let applicationAssessment = null;
-
-            draft.reports = draft.reports.filter((report) => report.submissionId !== submissionId);
-
-            const newReports = targets.map((target) => ({
-                id: crypto.randomUUID(),
+            const reportRow = prodInsertReport(draft, {
                 reference: createReference('REP'),
-                submissionId,
-                venueId: venue?.id || null,
-                placeProviderId: venue?.placeProviderId || null,
-                matchedTrackId: target.matchedTrackId,
-                matchedTrackConfidence: target.matchedTrackConfidence,
-                rightsOwnerOrgId: target.rightsOwnerOrgId,
-                rightsType: target.rightsType,
+                submission_id: submissionId,
+                processing_stage: 'quick_id',
+                matched_track_confidence: Number(song?.matchScore ?? 0),
                 title: song?.title || 'Unknown Track',
                 artist: song?.artist || 'Unknown Artist',
                 label: song?.label || 'Unknown Label',
-                rightsOrg: song?.rights_org || null,
-                forensicSummary,
-                sourceAnalysis,
-                visualAnalysis: {
-                    ...visualAnalysis,
-                    peakWindows,
-                },
-                applicationAssessment: null,
-                deviceTrustBand: deriveDeviceTrustBand({
-                    abuseScore: install?.abuseScore || 0,
-                    startOffset: submissionRecord.measuredStartOffsetMs,
-                    endOffset: submissionRecord.measuredEndOffsetMs
-                }),
-                merchantMasterId: null,
-                caseId: null,
-                rewardEligibility: false,
-                rewardDisposition: 'pending_license_verification',
-                estimatedRecoverableValueInr: 0,
-                licenseAssessment: {
-                    status: 'unknown',
-                    source: 'pending'
-                },
-                analystStatus: 'unreviewed',
-                exportStatus: 'not_exported',
-                createdAt: reportCreatedAt,
-                updatedAt: reportCreatedAt
-            }));
-
-            for (const report of newReports) {
-                const { caseRecord, merchant, rewardEligible } = buildCaseForReport({
-                    data: draft,
-                    report,
-                    submission: submissionRecord,
-                    contributor,
-                    venue,
-                    createdAt: reportCreatedAt
+                rights_org: song?.rights_org || null,
+                created_at: reportCreatedAt,
+                updated_at: reportCreatedAt,
+            });
+            prodUpdateSubmissionFields(draft, submissionId, {
+                status: song ? 'identified' : 'needs_advanced',
+                report_ids: [reportRow.id],
+            });
+            if (jobId) {
+                prodUpdateProcessingJob(draft, jobId, {
+                    report_id: reportRow.id,
+                    response_payload: {
+                        recognized: Boolean(song),
+                        song_title: song?.title || null,
+                        artist: song?.artist || null,
+                        label: song?.label || null,
+                        rights_org: song?.rights_org || null,
+                        match_score: Number(song?.matchScore ?? 0),
+                    },
+                    status: 'done',
+                    finished_at: new Date().toISOString(),
                 });
-
-                if (!applicationAssessment) {
-                    const context = buildApplicationAssessmentContext({
-                        data: draft,
-                        report,
-                        submission: submissionRecord,
-                        venue,
-                        merchant,
-                        caseRecord,
-                        contributor,
-                        sourceAnalysis,
-                        visualAnalysis: {
-                            ...visualAnalysis,
-                            peakWindows,
-                        },
-                        forensicSummary,
-                        radioEvidence: submissionRecord.radioEvidence || null,
-                    });
-
-                    applicationAssessment = config.gemini_key
-                        ? await generateApplicationAssessment({
-                            context,
-                            frames: extractedFrames,
-                        }).catch(() => buildFallbackApplicationAssessment(context))
-                        : buildFallbackApplicationAssessment(context);
-                }
-
-                report.applicationAssessment = applicationAssessment;
-
-                if (rewardEligible) {
-                    ensureStageRewardsForCase({
-                        data: draft,
-                        caseRecord,
-                        report,
-                        contributor,
-                        merchant,
-                        createdAt: reportCreatedAt
-                    });
-                }
             }
-
-            draft.reports.push(...newReports);
-            submissionRecord.status = 'ready';
-            submissionRecord.processingCompletedAt = new Date().toISOString();
-            submissionRecord.derivedAudioAssetId = audioAsset.id;
-            submissionRecord.audioDeconstruction = audioDeconstruction;
-            submissionRecord.keyFrameAssetIds = frameAssets.map((asset) => asset.id);
-            submissionRecord.reportIds = newReports.map((report) => report.id);
-            submissionRecord.songIdentity = song;
-            submissionRecord.songIdentityAttempts = summarizeSongIdentityAttempts(songIdentityAttempts);
-            submissionRecord.bestSongIdentity = bestSongIdentityRecord;
-            submissionRecord.matchedSong = formatMatchedSong(song);
-            submissionRecord.venueId = venue?.id || null;
-            submissionRecord.matchedVenue = venue?.name || submissionRecord.matchedVenue || null;
-            submissionRecord.sourceAnalysis = sourceAnalysis;
-            submissionRecord.visualAnalysis = {
-                ...visualAnalysis,
-                peakWindows,
-            };
-            submissionRecord.applicationAssessment = applicationAssessment;
-            submissionRecord.processingError = null;
         });
     } catch (error) {
-        console.error('Submission processing failed:', error);
-        await mutatePlatformData((data) => {
-            const submission = data.submissions.find((item) => item.id === submissionId);
-            if (submission) {
-                submission.status = 'failed';
-                submission.processingError = error.message;
+        console.error('Quick-ID failed:', error);
+        await mutatePlatformData((draft) => {
+            const sub = prodFindSubmission(draft, submissionId);
+            // Don't clobber a hash-mismatch 'failed'; otherwise mark needs_advanced
+            // so the snitcher still gets a result and Phase 2 can retry.
+            if (sub && sub.status === 'identifying') {
+                prodUpdateSubmissionFields(draft, submissionId, { status: 'needs_advanced' });
+            }
+            if (jobId) prodUpdateProcessingJob(draft, jobId, { status: 'failed', error_message: error.message, finished_at: new Date().toISOString() });
+        });
+    } finally {
+        processingSubmissions.delete(submissionId);
+    }
+};
+
+const queueQuickIdentify = (submissionId) => {
+    setTimeout(() => {
+        quickIdentifySubmission(submissionId).catch((error) => {
+            console.error('Queued quick-ID failed:', error);
+        });
+    }, 0);
+};
+
+// ─── Phase 2: Advanced processing (deferred / manual, heavy) ───
+// The full forensic pass — Demucs (local or Replicate), multi-pass
+// fingerprinting, source/visual/application analysis, and declared-context
+// reconciliation. Triggered later/on-demand, NOT during capture. ENRICHES the
+// Phase 1 quick-ID report in place (processing_stage 'quick_id' → 'full') rather
+// than inserting a second report.
+const runAdvancedProcessing = async (submissionId) => {
+    if (processingSubmissions.has(submissionId)) {
+        return;
+    }
+    processingSubmissions.add(submissionId);
+
+    let jobId = null;
+
+    try {
+        // Mark in-progress and create a processing_jobs row.
+        await mutatePlatformData((draft) => {
+            const sub = prodFindSubmission(draft, submissionId);
+            if (sub) {
+                sub.status = 'processing';
+                sub.updated_at = new Date().toISOString();
+            }
+            const job = prodInsertProcessingJob(draft, {
+                submission_id: submissionId,
+                job_type: 'full_pipeline',
+                provider: 'internal',
+                status: 'running',
+                started_at: new Date().toISOString(),
+            });
+            jobId = job.id;
+        });
+
+        const data = await readPlatformData();
+        const submission = prodFindSubmission(data, submissionId);
+        if (!submission) {
+            throw new Error('V2 submission not found');
+        }
+
+        // Resolve raw asset path from the production assets table.
+        const rawAssetRow = data.production?.assets?.find(
+            (a) => a.id === submission.raw_video_asset_id,
+        ) || null;
+        if (!rawAssetRow?.object_key) {
+            throw new Error('Raw video asset missing from production store');
+        }
+        const rawAssetPath = path.join(MEDIA_DIR, rawAssetRow.object_key);
+
+        // Hash integrity check.
+        if (submission.media_sha256) {
+            const rawFileBuffer = await fs.readFile(rawAssetPath);
+            const computedHash = crypto.createHash('sha256').update(rawFileBuffer).digest('hex');
+            if (computedHash !== submission.media_sha256) {
+                await mutatePlatformData((draft) => {
+                    prodUpdateSubmissionFields(draft, submissionId, { integrity_flag: 'hash_mismatch' });
+                    if (jobId) prodUpdateProcessingJob(draft, jobId, { status: 'failed', error_message: 'hash_mismatch', finished_at: new Date().toISOString() });
+                });
+                throw new Error(`Media integrity check failed: hash mismatch (expected ${submission.media_sha256.slice(0, 12)}…)`);
+            }
+        }
+
+        // Resolve the production venue row (upserted at capture-create time).
+        const venueId = submission.selected_venue_context?.venue_id || null;
+        const prodVenueRow = venueId
+            ? (data.production?.venues?.find((v) => v.id === venueId) || null)
+            : null;
+        // Adapt to the shape Gemini helpers expect (camelCase subset).
+        const venue = prodVenueRow ? {
+            id: prodVenueRow.id,
+            name: prodVenueRow.name,
+            address: prodVenueRow.address,
+            city: prodVenueRow.city,
+            placeProviderId: prodVenueRow.place_provider_id,
+        } : null;
+
+        // Resolve capture session for offsets.
+        const captureSession = data.production?.capture_sessions?.find(
+            (cs) => cs.id === submission.capture_session_id,
+        ) || null;
+
+        const pipeline = await runEvidencePipeline({
+            rawAssetPath,
+            reference: submission.reference,
+            submissionId,
+            data,
+            durationSeconds: submission.duration_seconds || 0,
+            measuredStartOffsetMs: captureSession?.measured_start_offset_ms || 0,
+            measuredEndOffsetMs: captureSession?.measured_end_offset_ms || 0,
+            sourceClassifierMode: submission.capture_context?.source_classifier_mode || DEFAULT_SOURCE_CLASSIFIER_MODE,
+            bestSongIdentity: null,
+            venue,
+        });
+
+        const {
+            song,
+            audioDeconstruction,
+            audioAsset,
+            frameAssets,
+            extractedFrames,
+            sourceAnalysis,
+            peakWindows,
+            forensicSummary,
+            visualAnalysis,
+        } = pipeline;
+
+        // Build applicationAssessment with reduced context — no merchant/case/contributor
+        // (those are Slice 3). buildApplicationAssessmentContext handles null gracefully
+        // for those fields.
+        const appAssessmentContext = buildApplicationAssessmentContext({
+            data,
+            report: {
+                matchedTrackConfidence: Number(pipeline.bestSongIdentityRecord?.matchScore ?? (song ? 1 : 0)),
+                deviceTrustBand: 'unscored',
+                licenseAssessment: { status: 'unknown' },
+            },
+            submission: {
+                durationSeconds: submission.duration_seconds || 0,
+                measuredStartOffsetMs: captureSession?.measured_start_offset_ms || 0,
+                measuredEndOffsetMs: captureSession?.measured_end_offset_ms || 0,
+                geolocationStart: submission.geolocation_start,
+                geolocationEnd: submission.geolocation_end,
+                selectedVenue: submission.selected_venue_context,
+            },
+            venue,
+            merchant: null,
+            caseRecord: null,
+            contributor: null,
+            sourceAnalysis,
+            visualAnalysis: { ...visualAnalysis, peakWindows },
+            forensicSummary,
+            radioEvidence: submission.radio_context || null,
+        });
+        const applicationAssessment = config.groq_key
+            ? await generateApplicationAssessment({ context: appAssessmentContext, frames: extractedFrames })
+                .catch(() => buildFallbackApplicationAssessment(appAssessmentContext))
+            : buildFallbackApplicationAssessment(appAssessmentContext);
+
+        // Fuse the snitcher's DECLARED context (a claim) with the DETECTED
+        // evidence. The LLM above reasoned on evidence only; reconcileContext
+        // is the bounded, auditable overlay through which the declaration is
+        // allowed to influence routing — never reward/legal. This is what makes
+        // a private-looking-but-declared society event route to review instead
+        // of being discarded, and what makes a contradicting claim light up.
+        const reconciliation = reconcileContext({
+            declared: submission.capture_context?.declared,
+            detected: {
+                sourceClass: sourceAnalysis?.sourceClass,
+                visualPlaybackContext: visualAnalysis?.playbackContext,
+                locationContext: applicationAssessment?.locationContext,
+                privateSpaceRisk: applicationAssessment?.privateSpaceRisk,
+            },
+        });
+
+        // Deterministic disposition overlay on top of the LLM's evidence-based
+        // recommendation, recorded explicitly so the influence is auditable.
+        let finalApplicationAssessment = applicationAssessment;
+        if (reconciliation.dispositionOverride && applicationAssessment) {
+            finalApplicationAssessment = {
+                ...applicationAssessment,
+                recommendedDisposition: reconciliation.dispositionOverride,
+                contextOverlayApplied: true,
+                priorityEscalated: reconciliation.priorityEscalated,
+                reasons: reconciliation.reviewReason
+                    ? [reconciliation.reviewReason, ...(applicationAssessment.reasons || [])]
+                    : (applicationAssessment.reasons || []),
+            };
+        }
+
+        await mutatePlatformData((draft) => {
+            const reportCreatedAt = new Date().toISOString();
+            // Enrich the Phase 1 quick-ID report in place; insert only if none
+            // exists (e.g. a submission that skipped Phase 1).
+            const existingReport = (prodFindSubmission(draft, submissionId)?.report_ids || [])
+                .map((rid) => draft.production?.reports?.find((r) => r.id === rid))
+                .find(Boolean) || null;
+
+            // Song: prefer the heavy multi-pass result; otherwise keep whatever
+            // Phase 1's quick pass already found on the report.
+            const songFields = song ? {
+                matched_track_confidence: Number(pipeline.bestSongIdentityRecord?.matchScore ?? 1),
+                title: song.title || 'Unknown Track',
+                artist: song.artist || 'Unknown Artist',
+                label: song.label || 'Unknown Label',
+                rights_org: song.rights_org || null,
+            } : (existingReport && existingReport.title !== 'Unknown Track' ? {} : {
+                matched_track_confidence: 0,
+                title: 'Unknown Track',
+                artist: 'Unknown Artist',
+                label: 'Unknown Label',
+            });
+
+            const fullFields = {
+                venue_id: prodVenueRow?.id || null,
+                place_provider_id: prodVenueRow?.place_provider_id || null,
+                processing_stage: 'full',
+                forensic_summary: forensicSummary,
+                source_analysis: sourceAnalysis,
+                visual_analysis: { ...visualAnalysis, peakWindows },
+                application_assessment: finalApplicationAssessment,
+                license_assessment: { status: 'unknown', source: 'pending' },
+                space_class: reconciliation.spaceClass,
+                context_reconciliation: reconciliation,
+                ...songFields,
+            };
+
+            let reportRow;
+            if (existingReport) {
+                reportRow = prodUpdateReportFields(draft, existingReport.id, fullFields);
+            } else {
+                reportRow = prodInsertReport(draft, {
+                    reference: createReference('REP'),
+                    submission_id: submissionId,
+                    matched_track_id: null,
+                    rights_owner_org_id: null,
+                    rights_type: null,
+                    device_trust_band: 'unscored',
+                    analyst_status: 'unreviewed',
+                    export_status: 'not_exported',
+                    merchant_master_id: null,
+                    created_at: reportCreatedAt,
+                    updated_at: reportCreatedAt,
+                    title: 'Unknown Track',
+                    artist: 'Unknown Artist',
+                    label: 'Unknown Label',
+                    ...fullFields,
+                });
+            }
+
+            prodUpdateSubmissionFields(draft, submissionId, {
+                status: 'ready',
+                derived_audio_asset_id: audioAsset.id,
+                report_ids: [reportRow.id],
+            });
+
+            if (jobId) {
+                prodUpdateProcessingJob(draft, jobId, {
+                    report_id: reportRow.id,
+                    output_asset_ids: [audioAsset.id, ...frameAssets.map((a) => a.id)],
+                    response_payload: {
+                        song_identified: Boolean(song),
+                        song_title: song?.title || null,
+                        source_class: sourceAnalysis?.sourceClass || null,
+                        space_class: reconciliation.spaceClass,
+                        declaration_agreement: reconciliation.agreement,
+                        frame_count: frameAssets.length,
+                        audio_deconstruction: audioDeconstruction,
+                    },
+                    status: 'done',
+                    finished_at: new Date().toISOString(),
+                });
+            }
+        });
+    } catch (error) {
+        console.error('V2 submission processing failed:', error);
+        await mutatePlatformData((draft) => {
+            prodUpdateSubmissionFields(draft, submissionId, { status: 'failed' });
+            if (jobId) {
+                prodUpdateProcessingJob(draft, jobId, {
+                    status: 'failed',
+                    error_message: error.message,
+                    finished_at: new Date().toISOString(),
+                });
             }
         });
     } finally {
@@ -3572,10 +4073,10 @@ const processSubmission = async (submissionId) => {
     }
 };
 
-const queueSubmissionProcessing = (submissionId) => {
+const queueAdvancedProcessing = (submissionId) => {
     setTimeout(() => {
-        processSubmission(submissionId).catch((error) => {
-            console.error('Queued submission processing failed:', error);
+        runAdvancedProcessing(submissionId).catch((error) => {
+            console.error('Queued advanced processing failed:', error);
         });
     }, 0);
 };
@@ -3861,6 +4362,22 @@ const screenReplayPatterns = [
     /\bplaying on (a )?laptop\b/i,
 ];
 
+const directFeedReplayPatterns = [
+    /\bdigital audio overlay\b/i,
+    /\baudio overlay\b/i,
+    /\boverdub\b/i,
+    /\bnot an ambient microphone recording\b/i,
+    /\bdirect feed\b/i,
+    /\bline feed\b/i,
+];
+
+const negatedDirectFeedPatterns = [
+    /\brather than (a )?(direct|line) feed\b/i,
+    /\bnot (a )?(direct|line) feed\b/i,
+    /\bno (direct|line) feed\b/i,
+    /\bwithout (a )?(direct|line) feed\b/i,
+];
+
 const publicVenuePatterns = [
     /\bcafe\b/i,
     /\bcoffee shop\b/i,
@@ -3927,6 +4444,19 @@ const crowdPatterns = [
 ];
 
 const includesAnyPattern = (text, patterns = []) => patterns.some((pattern) => pattern.test(text));
+
+const hasDirectFeedReplayCue = (text) => {
+    const value = String(text || '');
+    const hasOverlayCue = directFeedReplayPatterns
+        .slice(0, 4)
+        .some((pattern) => pattern.test(value));
+    if (hasOverlayCue) {
+        return true;
+    }
+
+    return /\b(direct|line) feed\b/i.test(value)
+        && !includesAnyPattern(value, negatedDirectFeedPatterns);
+};
 
 const buildInstallHistorySignals = ({ data, submission, currentReport = null }) => {
     if (!submission?.installId) {
@@ -4060,9 +4590,12 @@ const buildApplicationAssessmentContext = ({
         },
         radio: {
             wifi: {
-                connected: wifiEvidence?.status === 'connected',
+                connected: wifiEvidence?.isConnected === true || wifiEvidence?.status === 'connected',
                 status: wifiEvidence?.status || null,
                 transport: wifiEvidence?.transport || null,
+                ssid: wifiEvidence?.ssid || null,
+                bssid: wifiEvidence?.bssid || null,
+                summary: summarizeRadioEntry(wifiEvidence),
                 ssidPresent: Boolean(wifiEvidence?.ssid),
                 bssidPresent: Boolean(wifiEvidence?.bssid),
             },
@@ -4144,16 +4677,39 @@ const buildFallbackApplicationAssessment = (context) => {
     const text = context.visual.narrativeText || '';
     const selectedMatchedAligned = Boolean(context.venue.selectedMatchedAligned);
     const sourceClass = context.audio.sourceClass;
-    const sourcePersonal = ['likely_small_speaker', 'likely_personal_device'].includes(sourceClass);
-    const sourcePa = sourceClass === 'likely_pa_system';
+    // The structured classifier is authoritative for what kind of playback (if
+    // any) is present. A small venue speaker is a venue source, not a personal
+    // device; no-music/speech/TV classes mean there is no enforceable venue
+    // playback regardless of what the narrative text says.
+    const sourceVenuePlayback = sourceClassSupportsVenuePlayback(sourceClass);
+    const sourceNonMusic = isNonMusicSourceClass(sourceClass);
+    const sourcePersonal = ['likely_personal_device', 'personal_device'].includes(sourceClass);
+    const sourcePa = sourceVenuePlayback;
     const nearField = context.audio.nearFieldBloomSuspicion >= 1;
     const crowdCue = includesAnyPattern(text, crowdPatterns);
     const publicVenueCue = includesAnyPattern(text, publicVenuePatterns);
+    const directFeedCue = hasDirectFeedReplayCue(text);
+    const venueNameTokens = [
+        context.venue.selectedVenueName,
+        context.venue.matchedVenueName,
+    ]
+        .flatMap((name) => cleanString(name).split(/[^a-z0-9]+/i))
+        .filter((token) => token.length >= 4);
+    const radioText = cleanString([
+        context.radio.wifi.ssid,
+        context.radio.wifi.bssid,
+        context.radio.wifi.summary,
+    ].filter(Boolean).join(' '));
+    const radioVenueCue = Boolean(
+        context.radio.wifi.connected
+        && radioText
+        && venueNameTokens.some((token) => radioText.includes(token))
+    );
     const strongVenueContext = selectedMatchedAligned
         && context.capture.geoBucket === 'inside'
-        && (crowdCue || publicVenueCue || context.visual.venueCueCount >= 3);
+        && (crowdCue || publicVenueCue || radioVenueCue || context.visual.venueCueCount >= 3);
     const homeCue = includesAnyPattern(text, privateHomePatterns) && !strongVenueContext;
-    const screenCue = includesAnyPattern(text, screenReplayPatterns) && !strongVenueContext;
+    const screenCue = sourceClass === 'tv_screen' || directFeedCue || (includesAnyPattern(text, screenReplayPatterns) && !strongVenueContext);
     const vehicleCue = includesAnyPattern(text, vehiclePatterns);
     const hotelCue = includesAnyPattern(text, hotelRoomPatterns)
         || (cleanString(context.merchant.venueType).includes('hotel') && homeCue);
@@ -4172,6 +4728,7 @@ const buildFallbackApplicationAssessment = (context) => {
     const obstructionPenalty = Math.min(0.3, (context.visual.obstructionFlags.length || 0) * 0.08);
     const venueCueSupport = Math.min(0.28, context.visual.venueCueCount * 0.08);
     const venueContextMitigation = strongVenueContext ? 0.26 : 0;
+    const radioVenueMitigation = radioVenueCue ? 0.08 : 0;
     const installedPlaybackMitigation = strongVenueContext && sourcePa && !nearField ? 0.12 : 0;
 
     let attributionConfidence = 0.16;
@@ -4188,7 +4745,7 @@ const buildFallbackApplicationAssessment = (context) => {
         attributionConfidence += 0.08;
     }
     if (context.radio.wifi.connected && (context.radio.wifi.ssidPresent || context.radio.wifi.bssidPresent)) {
-        attributionConfidence += 0.05;
+        attributionConfidence += radioVenueCue ? 0.1 : 0.05;
     }
     if (sourcePa && !nearField) {
         attributionConfidence += 0.08;
@@ -4205,6 +4762,9 @@ const buildFallbackApplicationAssessment = (context) => {
     }
     if (sourcePersonal) {
         attributionConfidence -= 0.12;
+    }
+    if (sourceNonMusic) {
+        attributionConfidence -= 0.2;
     }
     if (screenCue || homeCue || vehicleCue || trackConfirmedVehicle) {
         attributionConfidence -= 0.18;
@@ -4234,16 +4794,19 @@ const buildFallbackApplicationAssessment = (context) => {
         + (nearField ? 0.15 : 0)
         + (!crowdCue && context.visual.venueCueCount === 0 ? 0.1 : 0)
         - venueContextMitigation
+        - radioVenueMitigation
         - installedPlaybackMitigation,
         0.3
     );
     const replayRisk = scoreZeroToOne(
         (screenCue ? 0.48 : 0)
+        + (directFeedCue ? 0.24 : 0)
         + (sourcePersonal ? 0.16 : 0)
         + (nearField ? 0.12 : 0)
         + (context.visual.venueCueCount === 0 ? 0.08 : 0)
         + (!crowdCue ? 0.06 : 0)
         - venueContextMitigation
+        - radioVenueMitigation
         - installedPlaybackMitigation,
         0.25
     );
@@ -4380,14 +4943,25 @@ const buildFallbackApplicationAssessment = (context) => {
         reasons.push('Device was connected to Wi-Fi during capture, but that remains corroborating only.');
         edgeCaseTags.push('radio_overclaim_risk');
     }
+    if (radioVenueCue) {
+        reasons.push('Connected Wi-Fi context includes venue-name cues.');
+    }
     if (sourcePersonal || nearField) {
         reasons.push('Audio source signals lean toward near-field or personal-device playback.');
     }
+    if (sourceNonMusic) {
+        reasons.push(`Source classifier reports no enforceable venue music playback (${toOperationalSourceLabel(sourceClass)}).`);
+        evidenceGaps.push('No venue music playback was detected in the capture audio.');
+    }
     if (screenCue) {
         edgeCaseTags.push('screen_replay');
-        if (/\blivestream\b|\breel\b|\binstagram\b/i.test(text)) {
+        if (directFeedCue || /\blivestream\b|\breel\b|\binstagram\b/i.test(text)) {
             edgeCaseTags.push('livestream_replay');
         }
+    }
+    if (directFeedCue) {
+        reasons.push('Forensic audio narrative suggests direct feed or digital overlay risk.');
+        evidenceGaps.push('Confirm the audio is ambient room capture rather than injected or overlaid media.');
     }
     if (homeCue) {
         edgeCaseTags.push('home_recording');
@@ -4452,21 +5026,13 @@ const buildFallbackApplicationAssessment = (context) => {
 
 async function generateApplicationAssessment({ context, frames = [] }) {
     const parts = [];
-
     frames.slice(0, 3).forEach((frame, index) => {
-        parts.push({
-            text: `Frame ${index + 1} was captured at ${Number(frame.timestampSeconds || 0).toFixed(2)} seconds.`
-        });
-        parts.push({
-            inlineData: {
-                data: frame.buffer.toString('base64'),
-                mimeType: frame.mimeType || 'image/jpeg'
-            }
-        });
+        parts.push({ text: `Frame ${index + 1} was captured at ${Number(frame.timestampSeconds || 0).toFixed(2)} seconds.` });
+        parts.push({ inlineData: { data: frame.buffer.toString('base64'), mimeType: frame.mimeType || 'image/jpeg' } });
     });
     parts.push({ text: buildApplicationAssessmentPrompt(context) });
 
-    const text = await generateGeminiText({ parts, label: 'application assessment' });
+    const text = await generateAIText({ parts, label: 'application assessment', jsonMode: true });
     return sanitizeApplicationAssessment(parseModelJson(text), context, 'application-v1');
 }
 
@@ -4484,7 +5050,7 @@ const buildSongContextForAssessment = (submission, report) => submission?.songId
     label: report?.label || 'Unknown Label',
 };
 
-const shouldUseGeminiForRescore = (useGemini = true) => useGemini && Boolean(config.gemini_key);
+const shouldUseAIForRescore = (useGemini = true) => useGemini && Boolean(config.groq_key);
 
 async function recomputeSubmissionAssessments({
     data,
@@ -4521,7 +5087,7 @@ async function recomputeSubmissionAssessments({
     if (refreshVisualAnalysis) {
         let refreshedVisualAnalysis = null;
 
-        if (shouldUseGeminiForRescore(useGemini) && frames.length) {
+        if (shouldUseAIForRescore(useGemini) && frames.length) {
             refreshedVisualAnalysis = await generateVisualEvidenceAssessment({
                 frames,
                 peakWindows,
@@ -4584,7 +5150,7 @@ async function recomputeSubmissionAssessments({
             radioEvidence: submission.radioEvidence || null,
         });
 
-        const applicationAssessment = shouldUseGeminiForRescore(useGemini)
+        const applicationAssessment = shouldUseAIForRescore(useGemini)
             ? await generateApplicationAssessment({ context, frames }).catch((error) => {
                 console.warn(`Application rescore failed for ${report.reference || report.id}:`, error.message);
                 return buildFallbackApplicationAssessment(context);
@@ -4978,9 +5544,11 @@ const buildReportView = (req, data, report) => {
     };
 };
 
-const PROTOTYPE_CASE_STAGES = ['New', 'Under Review', 'Agent Assignment', 'Ready For Legal', 'Recovery In Progress', 'Closed'];
+const PROTOTYPE_CASE_STAGES = ['New', 'Monitor / Enrich', 'Bad Case', 'Under Review', 'Agent Assignment', 'Ready For Legal', 'Recovery In Progress', 'Closed'];
 const PROTOTYPE_STAGE_TRANSITIONS = {
-    'New': ['Under Review'],
+    'New': ['Monitor / Enrich', 'Bad Case', 'Under Review'],
+    'Monitor / Enrich': ['New', 'Under Review', 'Closed'],
+    'Bad Case': ['New', 'Closed'],
     'Under Review': ['Agent Assignment', 'Ready For Legal', 'Recovery In Progress', 'Closed'],
     'Agent Assignment': ['Under Review', 'Recovery In Progress', 'Agent Assignment'],
     'Ready For Legal': ['Under Review', 'Closed', 'Ready For Legal'],
@@ -5017,9 +5585,23 @@ const splitPrototypeArtists = (value) => {
     return artists.length ? artists : [raw];
 };
 
-const getPrototypeCaseRecordByIdentifier = (data, identifier) => data.caseLedger.find((entry) => (
-    entry.reference === identifier || entry.id === identifier
-)) || null;
+const getPrototypeCaseRecordByIdentifier = (data, identifier) => {
+    const directMatch = data.caseLedger.find((entry) => (
+        entry.reference === identifier || entry.id === identifier
+    )) || null;
+
+    if (directMatch) {
+        return directMatch;
+    }
+
+    const report = data.reports.find((entry) => (
+        entry.reference === identifier
+        || entry.id === identifier
+        || `CASE-${String(entry.reference || '').replace(/^REP-?/i, '')}` === identifier
+    )) || null;
+
+    return report ? findCaseForReport(data, report.id) : null;
+};
 
 const getPrimaryReportForCaseRecord = (data, caseRecord) => {
     if (!caseRecord) {
@@ -5031,6 +5613,67 @@ const getPrimaryReportForCaseRecord = (data, caseRecord) => {
         || data.reports.find((report) => caseRecord.reportIds?.includes?.(report.id))
         || null
     );
+};
+
+const buildPrototypeCaseRecords = (data) => {
+    const records = [];
+
+    for (const report of data.reports) {
+        const ledgerCase = findCaseForReport(data, report.id);
+        const submission = data.submissions.find((entry) => entry.id === report.submissionId) || null;
+        const reference = `CASE-${String(report.reference || report.id).replace(/^REP-?/i, '')}`;
+
+        if (ledgerCase) {
+            records.push({
+                ...ledgerCase,
+                id: report.id === ledgerCase.primaryReportId ? ledgerCase.id : `${ledgerCase.id}:${report.id}`,
+                reference: report.id === ledgerCase.primaryReportId ? ledgerCase.reference : reference,
+                primaryReportId: report.id,
+                primarySubmissionId: report.submissionId,
+                createdAt: report.createdAt || ledgerCase.createdAt,
+                updatedAt: report.updatedAt || ledgerCase.updatedAt,
+                isVirtualReportCase: report.id !== ledgerCase.primaryReportId,
+                sourceCaseId: ledgerCase.id,
+                sourceCaseReference: ledgerCase.reference,
+            });
+            continue;
+        }
+
+        records.push({
+            id: `virtual:${report.id}`,
+            reference,
+            venueId: report.venueId || null,
+            rightsOwnerOrgId: report.rightsOwnerOrgId || null,
+            rightsType: report.rightsType || null,
+            primaryContributorId: submission?.contributorId || null,
+            primaryInstallId: submission?.installId || null,
+            primaryReportId: report.id,
+            primarySubmissionId: report.submissionId,
+            reportIds: [report.id],
+            corroborationReportIds: [],
+            evidenceCount: 1,
+            merchantMasterId: report.merchantMasterId || null,
+            licenseStatus: report.licenseAssessment?.status || 'pending',
+            licenseSource: report.licenseAssessment?.source || null,
+            rewardEligible: Boolean(report.rewardEligibility),
+            caseStatus: 'pending_license_verification',
+            planningBand: report.planningBand || null,
+            estimatedRecoverableValueInr: Number(report.estimatedRecoverableValueInr || 75000),
+            realizedValueInr: 0,
+            settlementSignedAt: null,
+            outcomeType: null,
+            tariffIds: [],
+            collectionProbability: 0,
+            nonComplianceMultiplier: 1,
+            createdAt: report.createdAt || submission?.createdAt || new Date().toISOString(),
+            updatedAt: report.updatedAt || report.createdAt || submission?.updatedAt || new Date().toISOString(),
+            isVirtualReportCase: true,
+            sourceCaseId: null,
+            sourceCaseReference: null,
+        });
+    }
+
+    return records;
 };
 
 const derivePrototypeStageFromCase = ({ caseRecord, primaryReport }) => {
@@ -5152,28 +5795,536 @@ const buildPrototypeChainOfCustody = ({ reportView, caseRecord }) => {
     return timeline.sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp));
 };
 
-const derivePrototypeQualityScore = ({ reportView, caseRecord }) => {
-    const capture = reportView?.evidencePackage?.captureIntegrity || {};
-    const audio = reportView?.evidencePackage?.audioIdentification || {};
-    const visual = reportView?.evidencePackage?.visualContext || {};
-    const rights = reportView?.evidencePackage?.rightsAndCaseContext || {};
-    const merchant = reportView?.evidencePackage?.venueContext?.merchant || null;
+// Two decoupled case scores replace the old qualityScore composite:
+//   evidenceValidity   - is the capture real, trustworthy, and attributable to
+//                        a venue? Independent of whether the song was identified.
+//   enforcementReadiness - can we actually act? Requires a valid capture AND a
+//                        resolved protected track AND a confirmed venue AND
+//                        venue-scale playback AND no legal block. An unknown-track
+//                        capture can be high-validity / low-readiness on purpose.
+const BLOCKED_VENUE_STATUSES = ['wrong_venue_or_unit', 'coordinate_only', 'blocked', 'rejected'];
+const AMBIGUOUS_VENUE_STATUSES = ['adjacent_venue_ambiguous'];
 
-    let score = 20;
+const toScoreBand = (score) => (score >= 67 ? 'high' : score >= 34 ? 'moderate' : 'low');
 
-    if (capture?.mediaSha256) score += 12;
-    if (capture?.signatureStatus === 'signed_and_verified') score += 14;
-    if (capture?.clockSkewStatus === 'clear') score += 8;
-    if (capture?.durationSeconds >= 15 && capture?.durationSeconds <= 20) score += 8;
-    score += Math.min(18, Math.round(Number(audio?.matchedTrackConfidence || 0) * 18));
-    if (Array.isArray(visual?.frames) && visual.frames.length) score += 8;
-    if ((visual?.venueIdentitySignals || []).length) score += 5;
-    if ((visual?.obstructionFlags || []).length) score -= 6;
-    if (merchant?.gstin) score += 5;
-    if (['unlicensed', 'expired'].includes(String(rights?.licenseAssessment?.status || '').toLowerCase())) score += 6;
-    if (Number(caseRecord?.realizedValueInr || 0) > 0) score += 4;
+const computeEvidenceValidity = (signals) => {
+    const tg = signals.trustGates || {};
+    let score = 0;
 
-    return Math.max(0, Math.min(100, score));
+    if (tg.mediaHashKey) score += 14;
+    if (tg.payloadSignature) score += 14;
+    if (tg.clockSkewDetection) score += 8;
+    if (tg.geofencingContinuity) score += 6;
+    if (tg.deviceTrustBand) score += 4;
+
+    if (signals.sourceSupportsVenuePlayback) {
+        score += 12 + Math.round(Math.min(1, Number(signals.sourceConfidence || 0)) * 6);
+    } else if (signals.sourceIsNonMusic) {
+        score -= 25;
+    } else if (signals.sourceClass === 'likely_personal_device' || signals.sourceClass === 'personal_device') {
+        score -= 6;
+    }
+
+    if (BLOCKED_VENUE_STATUSES.includes(signals.venueStatus)) {
+        score -= 30;
+    } else if (AMBIGUOUS_VENUE_STATUSES.includes(signals.venueStatus)) {
+        score += 4;
+    } else {
+        score += 14;
+    }
+
+    if (signals.withinEnvelope) score += 6;
+    if (signals.selectedMatchedAligned) score += 4;
+    if (signals.hasVenueCues) score += 8;
+
+    const bounded = Math.max(0, Math.min(100, score));
+    return signals.isBadCase ? Math.min(20, bounded) : bounded;
+};
+
+const computeEnforcementReadiness = (signals, validity) => {
+    if (signals.isBadCase) return 0;
+
+    let score = Math.round(validity * 0.5);
+    if (signals.hasResolvedSong) score += 25;
+    if (signals.sourceSupportsVenuePlayback) score += 12;
+    if (!BLOCKED_VENUE_STATUSES.includes(signals.venueStatus)
+        && !AMBIGUOUS_VENUE_STATUSES.includes(signals.venueStatus)) {
+        score += 8;
+    }
+    if (signals.hasRights) score += 6;
+    if (['unlicensed', 'expired'].includes(signals.licenseStatus)) score += 8;
+
+    let bounded = Math.max(0, Math.min(100, score));
+
+    // Hard ceilings: nothing is enforcement-ready without these, regardless of
+    // how strong the rest of the evidence is.
+    if (!signals.hasResolvedSong) bounded = Math.min(bounded, 25);
+    if (signals.sourceIsNonMusic) bounded = Math.min(bounded, 15);
+    if (BLOCKED_VENUE_STATUSES.includes(signals.venueStatus)) bounded = Math.min(bounded, 10);
+
+    return bounded;
+};
+
+const buildCaseScores = (signals) => {
+    const evidenceValidity = computeEvidenceValidity(signals);
+    const enforcementReadiness = computeEnforcementReadiness(signals, evidenceValidity);
+    return {
+        evidenceValidity,
+        evidenceValidityBand: toScoreBand(evidenceValidity),
+        enforcementReadiness,
+        enforcementReadinessBand: toScoreBand(enforcementReadiness),
+    };
+};
+
+const deriveLiveCaseScores = ({ reportView, caseRecord }) => {
+    const pkg = reportView?.evidencePackage || {};
+    const capture = pkg.captureIntegrity || {};
+    const audio = pkg.audioIdentification || {};
+    const visual = pkg.visualContext || {};
+    const rights = pkg.rightsAndCaseContext || {};
+    const source = pkg.sourceAssessment || {};
+    const locationDelta = pkg.locationDelta || {};
+    const sourceClass = String(source?.sourceClass || '').toLowerCase();
+    const hasResolvedSong = Number(audio?.matchedTrackConfidence || 0) > 0
+        && Boolean(audio?.title && !/^unknown/i.test(String(audio.title)));
+
+    return buildCaseScores({
+        trustGates: {
+            mediaHashKey: Boolean(capture?.mediaSha256),
+            payloadSignature: capture?.signatureStatus === 'signed_and_verified',
+            clockSkewDetection: capture?.clockSkewStatus === 'clear',
+            geofencingContinuity: locationDelta?.withinAccuracyEnvelope !== false,
+            deviceTrustBand: String(capture?.device?.deviceTrustBand || '').toLowerCase() === 'high',
+        },
+        sourceClass,
+        sourceConfidence: Number(source?.confidence || 0),
+        sourceSupportsVenuePlayback: source?.supportsVenuePlayback ?? sourceClassSupportsVenuePlayback(sourceClass),
+        sourceIsNonMusic: isNonMusicSourceClass(sourceClass),
+        venueStatus: String(pkg?.venueContext?.attribution?.status || '').toLowerCase(),
+        withinEnvelope: locationDelta?.withinAccuracyEnvelope === true,
+        selectedMatchedAligned: locationDelta?.selectedMatchedAligned === true,
+        hasVenueCues: (visual?.venueIdentitySignals || []).length > 0,
+        hasResolvedSong,
+        hasRights: Boolean(rights?.org?.name),
+        licenseStatus: String(rights?.licenseAssessment?.status || '').toLowerCase() || null,
+        isBadCase: false,
+    });
+};
+
+const hasResolvedPrototypeSong = (song = {}) => {
+    const title = String(song?.title || '').trim().toLowerCase();
+    const isrc = String(song?.isrc || '').trim().toLowerCase();
+    const upc = String(song?.upc || '').trim().toLowerCase();
+    const hasTitle = title && !['unknown track', 'unknown', 'unavailable', 'n/a'].includes(title);
+    const hasIdentifier = [isrc, upc].some((value) => value && !['unavailable', 'unknown', 'n/a', 'none'].includes(value));
+    return Boolean(hasTitle && hasIdentifier);
+};
+
+// Venue-cue scoring (VENUE_TOKEN_STOPLIST, scoreVenueCueMatch) now lives in
+// ./venueFingerprints.js so the server and the backfill script share one
+// implementation. scoreVenueCueMatch is imported above.
+
+const getImportedCaseWifiSummary = (caseData) => (
+    caseData?.radioContext?.wifi?.summary
+    || caseData?.radioContext?.wifi?.ssid
+    || caseData?.scoring?.venueIdentityScore?.factors?.find((factor) => factor?.signal === 'Radio venue hint' || factor?.signal === 'Radio context captured')?.evidence?.wifiSummary
+    || ''
+);
+
+// IMPORTANT: the AI narrative fields (performanceContext, visualSource) are NOT
+// independent venue-identity evidence. The vision model is handed the claimed
+// venue name and echoes it back ("the interior of 'Bean Theory Coffee'"), and it
+// even names the venue while *contradicting* it ("an office, negating Maratha
+// Katta"). Token-matching against them is circular and was producing false
+// confirmations, so they are deliberately excluded. Real visual corroboration
+// needs structured signage OCR (text actually read off signs in the frames);
+// until that field exists, there is no trustworthy visual signal here.
+const getImportedCaseVisualSignageText = (caseData) => cleanString(
+    caseData?.absoluteProof?.detectedSignageText || ''
+);
+
+// Ignore Wi-Fi placeholders that carry no venue identity ("Connected context
+// captured", "Not connected during capture", etc.) so they cannot masquerade as
+// a usable SSID cue.
+const isUsableWifiCue = (text) => Boolean(text) && !/^connected context|^not connected|context captured/i.test(text);
+
+// Review-only venue resolver. POLICY: never rewrite the snitcher's selected
+// venue. It scores every nearby candidate against all available identity signals
+// (Wi-Fi SSID, visual signage) and reports what the system *thinks* vs. what the
+// user *chose*, plus a discrepancy flag for fraud review when they disagree. A
+// human confirms; nothing is auto-corrected.
+const buildVenueResolutionReview = (caseData, fingerprintRegistry = []) => {
+    const attribution = caseData?.venueAttribution || null;
+    const status = String(attribution?.status || '').toLowerCase();
+    const selectedName = attribution?.targetVenue || caseData?.location?.name || '';
+    const rawCandidates = attribution?.nearbyVenueCandidates
+        || caseData?.locationDelta?.nearbyVenueCandidates
+        || [];
+
+    const wifiText = getImportedCaseWifiSummary(caseData);
+    const usableWifi = isUsableWifiCue(wifiText) ? wifiText : '';
+    const wifiBssid = caseData?.radioContext?.wifi?.bssid || null;
+    const visualText = getImportedCaseVisualSignageText(caseData);
+    const caseId = caseData?.id || caseData?.reference || null;
+
+    // Candidate universe = nearby candidates plus the selected venue itself.
+    const byName = new Map();
+    for (const cand of rawCandidates) {
+        if (cand?.name) byName.set(cand.name, cand);
+    }
+    if (selectedName && !byName.has(selectedName)) {
+        byName.set(selectedName, { name: selectedName, isSelectedVenue: true });
+    }
+
+    const candidates = [...byName.values()].map((cand) => {
+        const wifi = scoreVenueCueMatch(cand.name, usableWifi);
+        const visual = scoreVenueCueMatch(cand.name, visualText);
+        // Hardware fingerprint: does this BSSID's *independent* trusted history
+        // point at this candidate? Self-excluded so a case can't confirm itself.
+        const bssid = wifiBssid
+            ? scoreBssidVenueMatch(fingerprintRegistry, wifiBssid, {
+                placeProviderId: cand?.placeProviderId,
+                name: cand.name,
+            }, { excludeCaseId: caseId })
+            : { score: 0, corroboratingCount: 0, matchedVenue: null };
+        const distanceMeters = Number.isFinite(cand?.distanceMeters) ? Number(cand.distanceMeters) : null;
+        const signals = [];
+        if (wifi.score > 0) signals.push({ signal: 'wifi_ssid', score: wifi.score, matched: wifi.matchedTokens });
+        if (visual.score > 0) signals.push({ signal: 'visual_signage', score: visual.score, matched: visual.matchedTokens });
+        if (bssid.score > 0) signals.push({ signal: 'wifi_bssid', score: bssid.score, corroboratingCases: bssid.corroboratingCount });
+        return {
+            name: cand.name,
+            isUserSelected: cand.name === selectedName,
+            distanceMeters,
+            support: Number((wifi.score + visual.score + bssid.score).toFixed(2)),
+            signalCount: signals.length,
+            signals,
+        };
+    }).sort((a, b) => b.support - a.support || (a.distanceMeters ?? 1e9) - (b.distanceMeters ?? 1e9));
+
+    const selected = candidates.find((c) => c.isUserSelected) || null;
+    const selectedSupport = selected?.support || 0;
+    const best = candidates[0] || null;
+    const anySupport = candidates.some((c) => c.support > 0);
+
+    let recommendation = 'insufficient_evidence';
+    let systemRecommendedVenue = null;
+    let agreement = 'unsupported';
+    let discrepancy = null;
+
+    if (anySupport && best) {
+        if (best.isUserSelected) {
+            recommendation = 'confirms_selected';
+            agreement = 'agrees_with_user';
+            systemRecommendedVenue = best.name;
+        } else if (best.support > selectedSupport && best.signalCount >= 1) {
+            recommendation = 'suggests_alternate';
+            agreement = 'disagrees_with_user';
+            systemRecommendedVenue = best.name;
+            const margin = Number((best.support - selectedSupport).toFixed(2));
+            // Fraud-review severity: strongest when the user's pick has zero
+            // identity support but a nearby venue has multi-signal support.
+            const severity = (selectedSupport === 0 && best.signalCount >= 2) ? 'high'
+                : (best.signalCount >= 2 || margin >= 2) ? 'medium'
+                    : 'low';
+            discrepancy = {
+                flagged: true,
+                severity,
+                userSelectedVenue: selectedName || null,
+                systemRecommendedVenue: best.name,
+                supportMargin: margin,
+                userSelectedSupport: selectedSupport,
+                recommendedSupport: best.support,
+                note: `User selected ${selectedName || 'an unnamed venue'} but identity signals support ${best.name} (${best.signals.map((s) => s.signal).join(', ')}). Review for possible mis-selection or staged capture.`,
+            };
+        } else if (selectedSupport > 0) {
+            // An alternate leads on a tiebreak but is not clearly stronger than
+            // the user's pick, which itself has support: treat as confirming.
+            recommendation = 'confirms_selected';
+            agreement = 'agrees_with_user';
+            systemRecommendedVenue = selectedName;
+        }
+    }
+
+    const lead = systemRecommendedVenue
+        ? candidates.find((c) => c.name === systemRecommendedVenue)
+        : null;
+    // Confidence in the recommendation (not in the venue itself): grows with
+    // total support and the number of agreeing signals on the leading candidate.
+    const confidence = lead
+        ? Number(Math.max(0.3, Math.min(0.95, 0.3 + lead.support * 0.18 + (lead.signalCount - 1) * 0.12)).toFixed(2))
+        : 0;
+
+    return {
+        evaluatedAt: new Date().toISOString(),
+        policy: 'recommend_only_never_autocorrect',
+        userSelectedVenue: selectedName || null,
+        systemRecommendedVenue,
+        recommendation,
+        agreement,
+        confidence,
+        gpsVerdict: status || null,
+        signalsAvailable: {
+            wifiSsid: usableWifi || null,
+            wifiBssid,
+            visualSignage: Boolean(visualText),
+            bssidFingerprint: Boolean(wifiBssid) && Array.isArray(fingerprintRegistry) && fingerprintRegistry.length > 0,
+        },
+        limitations: [
+            'Venue identity is scored from the connected Wi-Fi SSID and the BSSID hardware fingerprint history.',
+            'AI visual narrative is excluded as circular (it echoes the claimed venue name); independent signage OCR is not yet captured.',
+            'BSSID corroboration requires at least one independent prior trusted case; a first-seen access point contributes no fingerprint signal until the registry is built.',
+        ],
+        candidates,
+        discrepancy,
+    };
+};
+
+const getImportedBadCaseReasons = (caseData) => {
+    const reasons = [];
+    const venueStatus = String(caseData?.venueAttribution?.status || '').toLowerCase();
+    const venueName = String(caseData?.location?.name || '');
+    const sourceAssessment = caseData?.sourceAssessment || null;
+    const sourceClass = String(sourceAssessment?.sourceClass || '').toLowerCase();
+    const sourceSignals = sourceAssessment?.signals || {};
+    const silenceRatio = Number(sourceSignals.silenceRatio || 0);
+    const overallRms = Number(sourceSignals.overallRms || 0);
+
+    if (venueStatus === 'coordinate_only' || /^Approx\. Venue/i.test(venueName)) {
+        reasons.push('coordinate_only_venue');
+    }
+
+    // Source determination is driven by the structured classifier first. The
+    // narrative aiExplanation is only consulted when no structured source class
+    // is available, so a text description of "music in a reverberant room" can
+    // no longer override a classifier that says there is no music.
+    if (sourceClass === 'no_music' || silenceRatio >= 0.9 || overallRms <= 0.0001) {
+        reasons.push('silent_or_no_music_audio');
+    }
+    if (sourceClass === 'speech_ambience') {
+        reasons.push('speech_or_ambience_no_music');
+    }
+    if (sourceClass === 'tv_screen') {
+        reasons.push('tv_or_screen_media_source');
+    }
+
+    if (!sourceClass) {
+        const visualText = cleanString([
+            caseData?.absoluteProof?.performanceContext,
+            caseData?.absoluteProof?.obstructionFlags,
+            caseData?.aiExplanation,
+        ].filter(Boolean).join(' '));
+        if (visualText.includes('residential') || visualText.includes('living room') || visualText.includes('home')) {
+            reasons.push('private_or_home_visual_context');
+        }
+        if (visualText.includes('checkerboard') || visualText.includes('television displaying')) {
+            reasons.push('screen_or_test_pattern_visual');
+        }
+        if (visualText.includes('no audio') || visualText.includes('completely silent')) {
+            reasons.push('silent_or_no_music_audio');
+        }
+    }
+
+    return [...new Set(reasons)];
+};
+
+const deriveImportedCaseScores = (caseData, { hasResolvedSong, isBadCase, venueStatus }) => {
+    const source = caseData?.sourceAssessment || {};
+    const sourceClass = String(source?.sourceClass || '').toLowerCase();
+    const trustGates = caseData?.trustGates || {};
+    const locationDelta = caseData?.locationDelta || {};
+    const frames = Array.isArray(caseData?.absoluteProof?.venueImages) ? caseData.absoluteProof.venueImages : [];
+    const rightsAssociation = String(caseData?.songAssessment?.rightsAssociation || '');
+
+    return buildCaseScores({
+        trustGates: {
+            mediaHashKey: Boolean(trustGates.mediaHashKey),
+            payloadSignature: Boolean(trustGates.payloadSignature),
+            clockSkewDetection: Boolean(trustGates.clockSkewDetection),
+            geofencingContinuity: Boolean(trustGates.geofencingContinuity),
+            deviceTrustBand: Boolean(trustGates.deviceTrustBand),
+        },
+        sourceClass,
+        sourceConfidence: Number(source?.confidence || 0),
+        sourceSupportsVenuePlayback: source?.supportsVenuePlayback ?? sourceClassSupportsVenuePlayback(sourceClass),
+        sourceIsNonMusic: isNonMusicSourceClass(sourceClass),
+        venueStatus: String(venueStatus || caseData?.venueAttribution?.status || '').toLowerCase(),
+        withinEnvelope: locationDelta?.withinAccuracyEnvelope === true,
+        selectedMatchedAligned: locationDelta?.selectedMatchedAligned === true,
+        hasVenueCues: frames.length > 0,
+        hasResolvedSong,
+        hasRights: Boolean(rightsAssociation) && !/pending/i.test(rightsAssociation),
+        licenseStatus: String(caseData?.licenseResolution?.status || '').toLowerCase() || null,
+        isBadCase,
+    });
+};
+
+const buildSignalSummary = (sourceAssessment) => {
+    if (!sourceAssessment) {
+        return null;
+    }
+    const sourceClass = sourceAssessment.sourceClass || null;
+    return {
+        sourceClass,
+        operationalLabel: sourceAssessment.operationalLabel || toOperationalSourceLabel(sourceClass),
+        supportsVenuePlayback: sourceAssessment.supportsVenuePlayback ?? sourceClassSupportsVenuePlayback(sourceClass),
+        sourceScore: sourceAssessment.score ?? null,
+        sourceConfidence: sourceAssessment.confidence ?? null,
+        classifierMode: sourceAssessment.classifierMode || sourceAssessment.requestedMode || null,
+    };
+};
+
+const normalizeImportedPrototypeCase = (caseData, fingerprintRegistry = []) => {
+    // Drop the legacy score-sprawl fields so they cannot leak through the spread.
+    // recoverableValue/expectedFine valuation is intentionally back-burnered (TBD)
+    // until a real monetary model exists; we keep a single provisional value.
+    const {
+        qualityScore: _qualityScore,
+        qualityScore10: _qualityScore10,
+        scoreScale: _scoreScale,
+        songEnforcementConfidence: _songEnforcementConfidence,
+        venueSourceConfidence: _venueSourceConfidence,
+        expectedFine: _expectedFine,
+        readiness: _readiness,
+        readiness_score: _readinessScore,
+        readiness_band: _readinessBand,
+        readiness_reasons: _readinessReasons,
+        next_actions: _nextActions,
+        prosecution_strength_score: _prosecutionScore,
+        prosecution_strength_label: _prosecutionLabel,
+        prosecution_strength_reasons: _prosecutionReasons,
+        ...rest
+    } = caseData;
+
+    const sourceAssessment = caseData?.sourceAssessment || null;
+    const hasResolvedSong = hasResolvedPrototypeSong(caseData?.songAssessment || {});
+    const badCaseReasons = getImportedBadCaseReasons(caseData);
+    const isBadCase = badCaseReasons.length >= 2;
+    const stage = isBadCase ? 'Bad Case' : hasResolvedSong ? (caseData?.stage || 'New') : 'Monitor / Enrich';
+
+    // Venue resolution is review-only: we never rewrite the snitcher's selected
+    // venue or its GPS verdict. We attach what the system's identity signals
+    // point to (and flag a mismatch for fraud review) and leave the original
+    // selection intact for a human to confirm.
+    const venueResolutionReview = buildVenueResolutionReview(caseData, fingerprintRegistry);
+
+    const scores = deriveImportedCaseScores(caseData, {
+        hasResolvedSong,
+        isBadCase,
+        venueStatus: caseData?.venueAttribution?.status,
+    });
+
+    return {
+        ...rest,
+        id: caseData?.id || caseData?.reference,
+        venueResolutionReview,
+        stage,
+        isNew: stage === 'New',
+        ...scores,
+        recoverableValue: Number(caseData?.recoverableValue || 0),
+        valuationStatus: 'tbd',
+        badCaseReasons,
+        enforcementBlockReason: isBadCase
+            ? `Bad case: ${badCaseReasons.join(', ')}. Extract signals only; do not enrich for enforcement.`
+            : hasResolvedSong ? null : 'Track identity is unresolved; keep monitoring/enriching before enforcement.',
+        scoreRecomputedAt: caseData?.scoreRecomputedAt || new Date().toISOString(),
+        signalSummary: buildSignalSummary(sourceAssessment),
+    };
+};
+
+// Build the BSSID fingerprint registry from APPROVED venue identifiers only.
+// This is what enforces the admin gate at resolution time: a proposed (not yet
+// approved) identifier never influences venue resolution. Output shape matches
+// what scoreBssidVenueMatch/lookupVenueByBssid expect (normalized bssid +
+// venueKey + corroborating caseIds).
+const buildFingerprintRegistryFromIdentifiers = (venueIdentifiers, venues) => {
+    const venueById = new Map((venues || []).map((v) => [v.id, v]));
+    const registry = [];
+    for (const vid of venueIdentifiers || []) {
+        if (vid.type !== 'wifi_bssid' || vid.status !== 'approved') continue;
+        const venue = venueById.get(vid.venueId);
+        if (!venue) continue;
+        const normBssid = normalizeBssid(vid.normalizedValue || vid.value);
+        if (!normBssid) continue;
+        registry.push({
+            bssid: normBssid,
+            venueKey: canonicalVenueKey({ placeProviderId: venue.placeProviderId, name: venue.name }),
+            placeProviderId: venue.placeProviderId || null,
+            venueName: venue.name || null,
+            caseIds: Array.isArray(vid.corroboratingCaseIds) ? vid.corroboratingCaseIds : [],
+        });
+    }
+    return registry;
+};
+
+// Render a canonical case (cases + its primary evidenceSubmission) into the
+// authority/CRM view. POLICY (workflow vs. diagnostics split):
+//   - Derived diagnostics (scores, badCaseReasons, venueResolutionReview,
+//     signalSummary) are recomputed on read from the preserved capture data.
+//   - Workflow state (stage, statusFlags) is NOT recomputed: cases.stage is
+//     authoritative and is passed through (mapped enum -> CRM label). We reuse
+//     normalizeImportedPrototypeCase for the diagnostics + passthrough, then
+//     overwrite the workflow fields with the canonical values.
+const normalizeCanonicalCase = (caseRec, data, fingerprintRegistry) => {
+    const primary = (data.evidenceSubmissions || []).find((s) => s.id === caseRec.primarySubmissionId);
+    const legacyShape = primary?.raw?.legacyCase;
+    if (!legacyShape) return null;
+
+    const view = normalizeImportedPrototypeCase(legacyShape, fingerprintRegistry);
+
+    // Canonical authority overrides (workflow state + cluster identity).
+    view.id = caseRec.id;
+    view.stage = stageToLabel(caseRec.stage);
+    view.canonicalStage = caseRec.stage;
+    view.isNew = caseRec.stage === 'new';
+    view.statusFlags = Array.isArray(caseRec.statusFlags) ? caseRec.statusFlags : [];
+    view.evidenceCount = caseRec.evidenceCount;
+    view.submissionIds = caseRec.submissionIds;
+    view.companyId = caseRec.companyId || null;
+    view.resolvedVenueId = caseRec.resolvedVenueId || null;
+    view.recoverableValue = Number(caseRec.recoverableValue || 0);
+    view.timestamp = caseRec.openedAt || view.timestamp;
+    return view;
+};
+
+const buildAuthorityPrototypeCases = (req, data) => {
+    // Canonical path (preferred): serve from the new cases + evidenceSubmissions
+    // collections once they are populated.
+    if (Array.isArray(data.cases) && data.cases.length) {
+        const fingerprintRegistry = buildFingerprintRegistryFromIdentifiers(data.venueIdentifiers, data.venues);
+        return data.cases
+            .map((caseRec) => normalizeCanonicalCase(caseRec, data, fingerprintRegistry))
+            .filter(Boolean)
+            .sort((left, right) => new Date(right.timestamp) - new Date(left.timestamp));
+    }
+
+    // Legacy fallback: imported prototypeCases blob (pre-migration).
+    if (Array.isArray(data.prototypeCases) && data.prototypeCases.length) {
+        return data.prototypeCases
+            .map((caseData) => normalizeImportedPrototypeCase(caseData, data.venueFingerprints))
+            .filter(Boolean)
+            .sort((left, right) => new Date(right.timestamp) - new Date(left.timestamp));
+    }
+
+    const byId = new Map();
+
+    for (const caseRecord of buildPrototypeCaseRecords(data)) {
+        const caseView = buildPrototypeCaseView(req, data, caseRecord);
+        if (caseView?.id) {
+            byId.set(caseView.id, caseView);
+        }
+    }
+
+    for (const importedCase of data.prototypeCases || []) {
+        const caseView = normalizeImportedPrototypeCase(importedCase, data.venueFingerprints);
+        if (caseView?.id) {
+            byId.set(caseView.id, caseView);
+        }
+    }
+
+    return [...byId.values()]
+        .filter(Boolean)
+        .sort((left, right) => new Date(right.timestamp) - new Date(left.timestamp));
 };
 
 const buildPrototypeCaseView = (req, data, caseRecord) => {
@@ -5189,6 +6340,7 @@ const buildPrototypeCaseView = (req, data, caseRecord) => {
     const capture = evidencePackage?.captureIntegrity || {};
     const audio = evidencePackage?.audioIdentification || {};
     const visual = evidencePackage?.visualContext || {};
+    const sourceAssessment = evidencePackage?.sourceAssessment || null;
     const venueContext = evidencePackage?.venueContext || {};
     const matchedVenue = venueContext?.matchedVenue || reportView?.venue || null;
     const selectedVenue = venueContext?.selectedVenue || reportView?.submission?.selectedVenue || null;
@@ -5207,7 +6359,7 @@ const buildPrototypeCaseView = (req, data, caseRecord) => {
     );
     const rawVideoUrl = normalizePrototypeAssetUrl(capture?.assets?.rawVideo?.url);
     const frameUrls = (visual?.frames || []).map((frame) => normalizePrototypeAssetUrl(frame.url)).filter(Boolean);
-    const qualityScore = derivePrototypeQualityScore({ reportView, caseRecord });
+    const caseScores = deriveLiveCaseScores({ reportView, caseRecord });
     const pastOffences = Math.max(
         0,
         data.caseLedger.filter((entry) => entry.venueId === caseRecord.venueId && entry.reference !== caseRecord.reference).length,
@@ -5247,7 +6399,8 @@ const buildPrototypeCaseView = (req, data, caseRecord) => {
             email: 'Not available',
         },
         pastOffences,
-        expectedFine: recoverableValue,
+        recoverableValue,
+        valuationStatus: 'tbd',
         musicLabel: audio?.label || reportView?.label || evidencePackage?.rightsAndCaseContext?.org?.name || 'Unknown Label',
         videoProofUrl: rawVideoUrl || '',
         aiExplanation: reportView?.forensicSummary || '',
@@ -5273,6 +6426,8 @@ const buildPrototypeCaseView = (req, data, caseRecord) => {
             performanceContext: visual?.summary || reportView?.forensicSummary || 'Evidence context is still being synthesized.',
         },
         audioDeconstruction,
+        sourceAssessment,
+        signalSummary: buildSignalSummary(sourceAssessment),
         evidenceVaults: [
             {
                 id: vaultId,
@@ -5287,8 +6442,7 @@ const buildPrototypeCaseView = (req, data, caseRecord) => {
         selectedVaultIds: [vaultId],
         chainOfCustody: buildPrototypeChainOfCustody({ reportView, caseRecord }),
         stage,
-        qualityScore,
-        recoverableValue,
+        ...caseScores,
         assignedTo: caseRecord?.authorityAssignedTo || undefined,
         notes: caseRecord?.authorityNotes || undefined,
         assignmentType,
@@ -5734,6 +6888,7 @@ app.post('/api/mobile/capture/session', requireMobileAuth, async (req, res) => {
 
     res.json({
         session_id: session.id,
+        session_nonce: session.sessionNonce,
         server_time: session.issuedServerTime,
         expires_at: new Date(now.getTime() + 10 * 60 * 1000).toISOString(),
     });
@@ -5794,6 +6949,7 @@ app.post('/api/mobile/capture/submissions', requireMobileAuth, async (req, res) 
         selected_venue_latitude: pickFirstDefined(body.selected_venue_latitude, body.selectedVenueLatitude),
         selected_venue_longitude: pickFirstDefined(body.selected_venue_longitude, body.selectedVenueLongitude),
         radio_evidence: pickFirstDefined(body.radio_evidence, body.radioEvidence),
+        audio_level_envelope: pickFirstDefined(body.audio_level_envelope, body.audioLevelEnvelope),
         source_classifier_mode: pickFirstDefined(body.source_classifier_mode, body.sourceClassifierMode),
     };
     const createdAt = new Date().toISOString();
@@ -5844,6 +7000,11 @@ app.post('/api/mobile/capture/submissions', requireMobileAuth, async (req, res) 
                 }
                 : null,
             radioEvidence: normalizeRadioEvidence(payload.radio_evidence),
+            audioLevelEnvelope: Array.isArray(payload.audio_level_envelope)
+                ? payload.audio_level_envelope
+                    .filter((n) => typeof n === 'number' && Number.isFinite(n))
+                    .slice(0, 256)
+                : null,
             consentVersion: 'snitchv1-mobile',
             status: 'received',
             uploadToken: crypto.randomBytes(16).toString('hex'),
@@ -5970,7 +7131,10 @@ app.post('/api/mobile/capture/submissions/:id/upload', requireMobileAuth, upload
 app.post('/api/mobile/capture/submissions/:id/finalize', requireMobileAuth, async (req, res) => {
     const submissionId = req.params.id;
     const media_hash = pickFirstDefined(req.body?.media_hash, req.body?.mediaHash);
-    const result = await mutatePlatformData((data) => {
+    const signature = req.body?.signature || null;
+    const signedPayload = pickFirstDefined(req.body?.signed_payload, req.body?.signedPayload) || null;
+
+    const result = await mutatePlatformData(async (data) => {
         const submission = data.submissions.find((item) => item.id === submissionId && item.mobileUserId === req.mobileUser.id);
         if (!submission) {
             throw new Error('Submission not found');
@@ -5979,7 +7143,49 @@ app.post('/api/mobile/capture/submissions/:id/finalize', requireMobileAuth, asyn
             throw new Error('Raw video must be uploaded before finalize');
         }
 
+        // Verify device-key provenance when the client supplied a signature. A
+        // signature that is present but invalid is a hard rejection; absence
+        // degrades to an unsigned (untrusted) submission so the flow still works
+        // for installs that predate key enrollment.
+        let hasValidSignature = false;
+        // Only attempt verification when the client signed AND the device key is
+        // enrolled. An un-enrolled install (e.g. predates key enrollment) degrades
+        // to unsigned rather than failing — but once a key exists, a bad signature
+        // or nonce is a hard rejection.
+        if (signature && signedPayload) {
+            const install = data.anonymousInstalls.find((item) => item.installId === submission.installId && item.mobileUserId === req.mobileUser.id);
+            const session = data.captureSessions.find((item) => item.id === submission.captureSessionId && item.mobileUserId === req.mobileUser.id);
+
+            if (install?.publicKey) {
+                // Replay protection: the signed nonce must match the one the
+                // server issued for this capture session.
+                if (!session?.sessionNonce || signedPayload.sessionNonce !== session.sessionNonce) {
+                    throw new Error('Capture session nonce mismatch');
+                }
+                // Bind the signature to this submission's identity and committed hash.
+                if (signedPayload.sessionId !== submission.captureSessionId || signedPayload.installId !== submission.installId) {
+                    throw new Error('Signed payload does not match submission');
+                }
+                const committedHash = media_hash || submission.mediaSha256 || null;
+                if (signedPayload.mediaSha256 !== committedHash) {
+                    throw new Error('Signed media hash does not match finalize hash');
+                }
+
+                const valid = await verifyInstallSignature({
+                    publicKey: install.publicKey,
+                    payload: buildMobileSignedFinalizePayload(signedPayload),
+                    signature,
+                });
+                if (!valid) {
+                    throw new Error('Invalid finalize signature');
+                }
+                hasValidSignature = true;
+            }
+        }
+
         submission.mediaSha256 = media_hash || submission.mediaSha256 || null;
+        submission.hasValidSignature = hasValidSignature;
+        submission.signatureVerifiedAt = hasValidSignature ? new Date().toISOString() : null;
         submission.status = 'processing';
         submission.finalizedAt = new Date().toISOString();
         submission.processingStartedAt = new Date().toISOString();
@@ -5988,10 +7194,10 @@ app.post('/api/mobile/capture/submissions/:id/finalize', requireMobileAuth, asyn
     }).catch((error) => ({ error }));
 
     if (result.error) {
-        return res.status(404).json({ error: result.error.message });
+        const message = result.error.message || 'Finalize failed';
+        const status = /not found/i.test(message) ? 404 : 400;
+        return res.status(status).json({ error: message });
     }
-
-    queueSubmissionProcessing(submissionId);
 
     res.json({
         submission_id: result.id,
@@ -6010,6 +7216,377 @@ app.get('/api/mobile/capture/submissions/:id/status', requireMobileAuth, async (
 
     res.set('Cache-Control', 'no-store');
     res.json(buildMobileSubmissionSummary(data, submission));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Production-shaped v2 capture path (writes data.production.* via productionStore).
+// LOSSLESS: keeps every signal the legacy path drops — device_context, GPS
+// altitude/speed/heading, wifi.networks[], BLE enrichment, audio envelope. This
+// path does not run analysis yet (status terminates at 'stored').
+// ─────────────────────────────────────────────────────────────────────────────
+
+const numOrNull = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+};
+
+const buildGeoRaw = ({ lat, lng, accuracy, altitude, speed, heading, capturedAt }) => {
+    if (numOrNull(lat) == null || numOrNull(lng) == null) {
+        return null;
+    }
+    return {
+        lat: numOrNull(lat),
+        lng: numOrNull(lng),
+        accuracy: numOrNull(accuracy),
+        altitude: numOrNull(altitude),
+        speed: numOrNull(speed),
+        heading: numOrNull(heading),
+        captured_at: capturedAt || null,
+    };
+};
+
+const geoPoint = (raw) => (raw ? { lat: raw.lat, lng: raw.lng } : null);
+
+// Preserve the FULL radio bundle — wifi.networks[] and the BLE enrichment fields
+// (displayName/inferredType/manufacturerId/manufacturerName) that the legacy
+// normalizeRadioEntry strips. Light array caps guard payload size.
+const extractRadioContextLossless = (value) => {
+    const raw = parseMaybeJson(value);
+    if (!raw || typeof raw !== 'object') {
+        return null;
+    }
+    const cap = (arr, n) => (Array.isArray(arr) ? arr.slice(0, n) : []);
+    const snapshot = (snap) => {
+        if (!snap || typeof snap !== 'object') {
+            return null;
+        }
+        const wifi = snap.wifi && typeof snap.wifi === 'object'
+            ? { ...snap.wifi, networks: cap(snap.wifi.networks, 40) }
+            : null;
+        const bluetooth = snap.bluetooth && typeof snap.bluetooth === 'object'
+            ? { ...snap.bluetooth, devices: cap(snap.bluetooth.devices, 40) }
+            : null;
+        return { ...snap, wifi, bluetooth };
+    };
+    return {
+        collectionVersion: typeof raw.collectionVersion === 'string' ? raw.collectionVersion : 'radio-evidence-v1',
+        start: snapshot(raw.start),
+        end: snapshot(raw.end),
+        limitations: Array.isArray(raw.limitations) ? raw.limitations.filter((item) => typeof item === 'string') : [],
+    };
+};
+
+const extractDeviceSnapshot = (value) => {
+    const raw = parseMaybeJson(value);
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null;
+};
+
+const cleanEnvelope = (value) => {
+    const raw = parseMaybeJson(value);
+    if (!Array.isArray(raw)) {
+        return null;
+    }
+    const nums = raw.filter((n) => typeof n === 'number' && Number.isFinite(n)).slice(0, 256);
+    return nums.length ? nums : null;
+};
+
+app.post('/api/mobile/v2/capture/submissions', requireMobileAuth, async (req, res) => {
+    const body = req.body || {};
+    const p = (snake, camel) => pickFirstDefined(body[snake], body[camel]);
+    const sessionId = p('session_id', 'sessionId');
+    const installId = p('install_id', 'installId');
+
+    const data = await readPlatformData();
+    const legacySession = data.captureSessions.find((s) => s.id === sessionId && s.mobileUserId === req.mobileUser.id);
+    const legacyInstall = data.anonymousInstalls.find((i) => i.installId === installId && i.mobileUserId === req.mobileUser.id);
+    if (!legacySession || !legacyInstall) {
+        return res.status(404).json({ error: 'Submission context is invalid' });
+    }
+
+    const createdAt = new Date().toISOString();
+    const startRaw = buildGeoRaw({
+        lat: p('start_lat', 'startLat'), lng: p('start_lng', 'startLng'), accuracy: p('start_accuracy', 'startAccuracy'),
+        altitude: p('start_altitude', 'startAltitude'), speed: p('start_speed', 'startSpeed'), heading: p('start_heading', 'startHeading'),
+        capturedAt: p('local_start_time', 'localStartTime') || createdAt,
+    });
+    const endRaw = buildGeoRaw({
+        lat: p('end_lat', 'endLat'), lng: p('end_lng', 'endLng'), accuracy: p('end_accuracy', 'endAccuracy'),
+        altitude: p('end_altitude', 'endAltitude'), speed: p('end_speed', 'endSpeed'), heading: p('end_heading', 'endHeading'),
+        capturedAt: p('local_end_time', 'localEndTime') || createdAt,
+    });
+
+    const selectedVenueName = p('selected_venue_name', 'selectedVenueName');
+    const selectedVenueContext = selectedVenueName ? {
+        place_provider_id: p('selected_venue_place_provider_id', 'selectedVenuePlaceProviderId') || null,
+        place_provider: normalizeVenueProvider(p('selected_venue_provider', 'selectedVenueProvider')) || null,
+        name: selectedVenueName,
+        address: p('selected_venue_address', 'selectedVenueAddress') || '',
+        city: p('selected_venue_city', 'selectedVenueCity') || null,
+        latitude: numOrNull(p('selected_venue_latitude', 'selectedVenueLatitude')),
+        longitude: numOrNull(p('selected_venue_longitude', 'selectedVenueLongitude')),
+    } : null;
+
+    const deviceSnapshot = extractDeviceSnapshot(p('device_context', 'deviceContext'));
+    const radioContext = extractRadioContextLossless(p('radio_evidence', 'radioEvidence'));
+    const audioEnvelope = cleanEnvelope(p('audio_level_envelope', 'audioLevelEnvelope'));
+
+    const submission = await mutatePlatformData((draft) => {
+        const legacyUser = draft.mobileUsers.find((u) => u.id === req.mobileUser.id) || req.mobileUser;
+        const draftInstall = draft.anonymousInstalls.find((i) => i.installId === installId) || legacyInstall;
+        const draftSession = draft.captureSessions.find((s) => s.id === sessionId) || legacySession;
+
+        mirrorMobileUser(draft, legacyUser);
+        mirrorDeviceInstall(draft, draftInstall);
+
+        prodUpsertCaptureSession(draft, {
+            id: sessionId,
+            install_id: installId,
+            session_nonce: draftSession.sessionNonce || null,
+            issued_server_time: draftSession.issuedServerTime || null,
+            start_server_time: draftSession.startServerTime || null,
+            local_start_time: p('local_start_time', 'localStartTime') || null,
+            measured_start_offset_ms: numOrNull(p('server_offset_start_ms', 'serverOffsetStartMs')),
+            measured_end_offset_ms: numOrNull(p('server_offset_end_ms', 'serverOffsetEndMs')),
+            geolocation_start: geoPoint(startRaw),
+            geolocation_end: geoPoint(endRaw),
+            geolocation_start_raw: startRaw,
+            geolocation_end_raw: endRaw,
+            device_snapshot: deviceSnapshot,
+            status: 'stored',
+        });
+
+        let venueRow = null;
+        if (selectedVenueContext) {
+            const fallbackKey = stableHash(`${(selectedVenueContext.name || '').toLowerCase()}:${(selectedVenueContext.address || '').toLowerCase()}`).slice(0, 12);
+            venueRow = prodUpsertVenue(draft, {
+                place_provider: selectedVenueContext.place_provider,
+                place_provider_id: selectedVenueContext.place_provider_id,
+                fallback_key: fallbackKey,
+                name: selectedVenueContext.name,
+                address: selectedVenueContext.address,
+                city: selectedVenueContext.city,
+                location: selectedVenueContext.latitude != null && selectedVenueContext.longitude != null
+                    ? { lat: selectedVenueContext.latitude, lng: selectedVenueContext.longitude }
+                    : geoPoint(endRaw || startRaw),
+            });
+        }
+
+        return prodInsertSubmission(draft, {
+            reference: createReference('SC'),
+            capture_session_id: sessionId,
+            install_id: installId,
+            mobile_user_id: req.mobileUser.id,
+            media_sha256: p('media_hash', 'mediaHash') || null,
+            duration_seconds: numOrNull(p('duration_seconds', 'durationSeconds')) ?? 0,
+            mime_type: p('mime_type', 'mimeType') || 'video/mp4',
+            file_name: p('file_name', 'fileName') || `${createReference('CAPTURE')}.mp4`,
+            file_size: numOrNull(p('file_size', 'fileSize')) ?? 0,
+            status: 'received',
+            upload_token_hash: stableHash(crypto.randomBytes(16).toString('hex')),
+            geolocation_start: geoPoint(startRaw),
+            geolocation_end: geoPoint(endRaw),
+            geolocation_start_raw: startRaw,
+            geolocation_end_raw: endRaw,
+            radio_context: radioContext,
+            selected_venue_context: venueRow ? { ...selectedVenueContext, venue_id: venueRow.id } : selectedVenueContext,
+            capture_context: {
+                note: body.note || null,
+                business_name: p('business_name', 'businessName') || null,
+                gstin: body.gstin || null,
+                source_classifier_mode: normalizeSourceClassifierMode(p('source_classifier_mode', 'sourceClassifierMode'), DEFAULT_SOURCE_CLASSIFIER_MODE),
+                // Snitcher's structured declaration — a CLAIM, attributed to this
+                // contributor. Quarantined under `declared`; routing reads only the
+                // derived report.context_reconciliation, never this block directly.
+                declared: normalizeDeclaredContext(p('declared_context', 'declaredContext')),
+            },
+            audio_level_envelope: audioEnvelope,
+            created_at: createdAt,
+        });
+    });
+
+    res.json({
+        submission_id: submission.id,
+        reference_id: submission.reference,
+        status: submission.status,
+        created_at: submission.created_at,
+    });
+});
+
+app.post('/api/mobile/v2/capture/submissions/:id/upload', requireMobileAuth, upload.single('video'), async (req, res) => {
+    const submissionId = req.params.id;
+    if (!req.file) {
+        return res.status(400).json({ error: 'Video file is required' });
+    }
+    if (req.file.size > CAPTURE_POLICY.maxUploadBytes) {
+        return res.status(400).json({ error: `Video exceeds ${CAPTURE_POLICY.maxUploadBytes} byte upload limit` });
+    }
+
+    const data = await readPlatformData();
+    const submission = prodFindSubmission(data, submissionId, req.mobileUser.id);
+    if (!submission) {
+        return res.status(404).json({ error: 'Submission not found' });
+    }
+
+    const acceptedMimeType = resolveAcceptedCaptureMimeType({
+        requestedMimeType: req.file.mimetype,
+        fallbackMimeType: submission.mime_type,
+        fileName: req.file.originalname || submission.file_name,
+    });
+    if (!acceptedMimeType) {
+        return res.status(400).json({ error: `Unsupported video type: ${req.file.mimetype}` });
+    }
+
+    const asset = await saveAsset({
+        buffer: req.file.buffer,
+        fileName: req.file.originalname || submission.file_name || `${submission.reference}.mp4`,
+        mimeType: acceptedMimeType,
+        kind: 'raw-video',
+        metadata: { submissionId, source: 'snitchv1_v2_capture' },
+    });
+
+    const result = await mutatePlatformData((draft) => {
+        const row = prodFindSubmission(draft, submissionId, req.mobileUser.id);
+        if (!row) {
+            throw new Error('Submission not found');
+        }
+        const assetRow = prodInsertAsset(draft, {
+            kind: 'raw-video',
+            storage_provider: 'local',
+            bucket: null,
+            object_key: asset.relativePath,
+            file_name: asset.fileName,
+            mime_type: acceptedMimeType,
+            size_bytes: asset.sizeBytes,
+            sha256: row.media_sha256 || null,
+            metadata: { submission_id: submissionId },
+        });
+        row.raw_video_asset_id = assetRow.id;
+        row.mime_type = acceptedMimeType;
+        row.file_name = asset.fileName;
+        row.file_size = asset.sizeBytes;
+        row.status = 'uploaded';
+        row.updated_at = new Date().toISOString();
+        return { submission: row, asset: assetRow };
+    }).catch((error) => ({ error }));
+
+    if (result.error) {
+        return res.status(404).json({ error: result.error.message });
+    }
+
+    res.json({
+        status: 'uploaded',
+        submission_id: submissionId,
+        asset_id: result.asset.id,
+        asset_url: buildAssetUrl(req, { relativePath: result.asset.object_key }),
+    });
+});
+
+app.post('/api/mobile/v2/capture/submissions/:id/finalize', requireMobileAuth, async (req, res) => {
+    const submissionId = req.params.id;
+    const media_hash = pickFirstDefined(req.body?.media_hash, req.body?.mediaHash);
+    const signature = req.body?.signature || null;
+    const signedPayload = pickFirstDefined(req.body?.signed_payload, req.body?.signedPayload) || null;
+
+    const result = await mutatePlatformData(async (draft) => {
+        const submission = prodFindSubmission(draft, submissionId, req.mobileUser.id);
+        if (!submission) {
+            throw new Error('Submission not found');
+        }
+        if (!submission.raw_video_asset_id) {
+            throw new Error('Raw video must be uploaded before finalize');
+        }
+
+        // Same provenance contract as the legacy mobile finalize: an enrolled
+        // key + present signature must verify (and the nonce must match the
+        // issued session); an un-enrolled install degrades to unsigned.
+        let hasValidSignature = false;
+        if (signature && signedPayload) {
+            const install = prodFindDeviceInstall(draft, submission.install_id);
+            const session = prodFindCaptureSession(draft, submission.capture_session_id);
+            if (install?.public_key) {
+                if (!session?.session_nonce || signedPayload.sessionNonce !== session.session_nonce) {
+                    throw new Error('Capture session nonce mismatch');
+                }
+                if (signedPayload.sessionId !== submission.capture_session_id || signedPayload.installId !== submission.install_id) {
+                    throw new Error('Signed payload does not match submission');
+                }
+                const committedHash = media_hash || submission.media_sha256 || null;
+                if (signedPayload.mediaSha256 !== committedHash) {
+                    throw new Error('Signed media hash does not match finalize hash');
+                }
+                const valid = await verifyInstallSignature({
+                    publicKey: install.public_key,
+                    payload: buildMobileSignedFinalizePayload(signedPayload),
+                    signature,
+                });
+                if (!valid) {
+                    throw new Error('Invalid finalize signature');
+                }
+                hasValidSignature = true;
+            }
+        }
+
+        submission.media_sha256 = media_hash || submission.media_sha256 || null;
+        submission.has_valid_signature = hasValidSignature;
+        submission.signature_status = hasValidSignature ? 'signed_and_verified' : 'unsigned_or_unverified';
+        submission.payload_signature = hasValidSignature;
+        submission.signature_verified_at = hasValidSignature ? new Date().toISOString() : null;
+        submission.status = 'stored';
+        submission.updated_at = new Date().toISOString();
+        return submission;
+    }).catch((error) => ({ error }));
+
+    if (result.error) {
+        const message = result.error.message || 'Finalize failed';
+        const status = /not found/i.test(message) ? 404 : 400;
+        return res.status(status).json({ error: message });
+    }
+
+    // Phase 1 only: a single quick ACRCloud pass so the snitcher gets the track +
+    // ownership fast. The heavy pass (Demucs/source/visual/reconciliation) is
+    // deferred to Phase 2, triggered later/manually.
+    queueQuickIdentify(result.id);
+
+    res.json({
+        submission_id: result.id,
+        reference_id: result.reference,
+        status: result.status,
+        has_valid_signature: result.has_valid_signature,
+    });
+});
+
+app.get('/api/mobile/v2/capture/submissions/:id/status', requireMobileAuth, async (req, res) => {
+    const data = await readPlatformData();
+    const submission = prodFindSubmission(data, req.params.id, req.mobileUser.id);
+    if (!submission) {
+        return res.status(404).json({ error: 'Submission not found' });
+    }
+
+    // Surface the quick-ID result so the snitcher sees the track + ownership.
+    const report = (submission.report_ids || [])
+        .map((rid) => data.production?.reports?.find((r) => r.id === rid))
+        .find(Boolean) || null;
+    const recognized = submission.status === 'identified'
+        || (submission.status === 'ready' && report?.title && report.title !== 'Unknown Track');
+    const song = recognized && report ? {
+        title: report.title,
+        artist: report.artist,
+        label: report.label,
+        rights_org: report.rights_org,
+        match_score: report.matched_track_confidence,
+    } : null;
+
+    res.set('Cache-Control', 'no-store');
+    res.json({
+        submission_id: submission.id,
+        reference_id: submission.reference,
+        status: submission.status,
+        has_valid_signature: submission.has_valid_signature,
+        created_at: submission.created_at,
+        recognized: Boolean(song),
+        song,
+        processing_stage: report?.processing_stage || null,
+    });
 });
 
 const buildTimeSyncPayload = () => {
@@ -6435,10 +8012,6 @@ app.post('/api/capture/submissions/:id/finalize', async (req, res) => {
         return res.status(400).json({ error: result.error.message });
     }
 
-    if (result.submission.status === 'processing') {
-        queueSubmissionProcessing(submissionId);
-    }
-
     res.json({
         submissionId,
         reference: result.submission.reference,
@@ -6516,8 +8089,6 @@ app.post('/api/capture/submissions/:id/retry', async (req, res) => {
         submissionRecord.processingError = null;
         submissionRecord.processingStartedAt = new Date().toISOString();
     }).catch((error) => ({ error }));
-
-    queueSubmissionProcessing(submissionId);
 
     res.json({
         submissionId: submission.id,
@@ -6819,13 +8390,9 @@ app.post('/api/portal/cases/:id/outcome', requireAuth, async (req, res) => {
 
 app.get('/api/authority-prototype/cases', async (req, res) => {
     const data = await readPlatformData();
-    const cases = data.caseLedger
-        .map((caseRecord) => buildPrototypeCaseView(req, data, caseRecord))
-        .filter(Boolean)
-        .sort((left, right) => new Date(right.timestamp) - new Date(left.timestamp));
 
     res.json({
-        cases,
+        cases: buildAuthorityPrototypeCases(req, data),
         generatedAt: new Date().toISOString(),
     });
 });
@@ -6840,6 +8407,77 @@ app.post('/api/authority-prototype/cases/:id/stage', async (req, res) => {
     }
 
     const result = await mutatePlatformData((data) => {
+        // Canonical path: stage lives on cases.stage (enum). The frontend speaks
+        // CRM labels; we validate the transition in label space (existing graph)
+        // then persist the enum + append a caseEvent. This is the authoritative
+        // write once cases are populated -- no split-brain with the read path.
+        const canonicalCase = (data.cases || []).find((entry) => entry.id === req.params.id || entry.reference === req.params.id);
+        if (canonicalCase) {
+            const currentLabel = stageToLabel(canonicalCase.stage);
+            if (currentLabel !== nextStage && !PROTOTYPE_STAGE_TRANSITIONS[currentLabel]?.includes(nextStage)) {
+                throw new Error(`Invalid stage transition: ${currentLabel} -> ${nextStage}`);
+            }
+            if (currentLabel !== nextStage) {
+                const now = new Date().toISOString();
+                const fromStage = canonicalCase.stage;
+                canonicalCase.stage = labelToStage(nextStage);
+                canonicalCase.updatedAt = now;
+                if (details) canonicalCase.notes = details;
+                if (!Array.isArray(data.caseEvents)) data.caseEvents = [];
+                data.caseEvents.push(makeCaseEvent({
+                    caseId: canonicalCase.id,
+                    eventType: CASE_EVENT_TYPE.STAGE_CHANGE,
+                    fromStage,
+                    toStage: canonicalCase.stage,
+                    actorType: ACTOR_TYPE.STAFF,
+                    actorId: actorRole,
+                    payload: { note: details || null, fromLabel: currentLabel, toLabel: nextStage },
+                }));
+            }
+            return { canonical: true, id: canonicalCase.id };
+        }
+
+        const importedCase = (data.prototypeCases || []).find((entry) => entry.id === req.params.id);
+        if (importedCase) {
+            const currentStage = importedCase.stage || 'New';
+            if (currentStage !== nextStage && !PROTOTYPE_STAGE_TRANSITIONS[currentStage]?.includes(nextStage)) {
+                throw new Error(`Invalid stage transition: ${currentStage} -> ${nextStage}`);
+            }
+
+            const now = new Date().toISOString();
+            const auditTrail = Array.isArray(importedCase.auditTrail) ? importedCase.auditTrail : [];
+            if (!auditTrail.length) {
+                auditTrail.push({
+                    id: `AUD-INIT-${importedCase.id}`,
+                    timestamp: importedCase.timestamp || importedCase.createdAt || now,
+                    action: 'Case Created',
+                    actor: 'System',
+                    newStage: currentStage,
+                    details: 'Imported from the latest prototype case export.',
+                });
+            }
+
+            if (currentStage !== nextStage) {
+                importedCase.stage = nextStage;
+                importedCase.isNew = nextStage === 'New';
+                importedCase.updatedAt = now;
+                if (details) {
+                    importedCase.notes = details;
+                }
+                auditTrail.push({
+                    id: crypto.randomUUID(),
+                    timestamp: now,
+                    action: 'Stage Updated',
+                    actor: actorRole,
+                    previousStage: currentStage,
+                    newStage: nextStage,
+                    details: details || 'No additional notes provided.',
+                });
+            }
+            importedCase.auditTrail = auditTrail;
+            return { imported: true, id: importedCase.id };
+        }
+
         const caseRecord = getPrototypeCaseRecordByIdentifier(data, req.params.id);
         const primaryReport = getPrimaryReportForCaseRecord(data, caseRecord);
         if (!caseRecord || !primaryReport) {
@@ -6886,10 +8524,10 @@ app.post('/api/authority-prototype/cases/:id/stage', async (req, res) => {
     }
 
     const data = await readPlatformData();
-    const updatedCase = getPrototypeCaseRecordByIdentifier(data, req.params.id);
+    const updatedCase = buildAuthorityPrototypeCases(req, data).find((entry) => entry.id === req.params.id) || null;
     res.json({
         ok: true,
-        case: buildPrototypeCaseView(req, data, updatedCase),
+        case: updatedCase,
     });
 });
 
@@ -7018,8 +8656,6 @@ app.post('/api/authority-prototype/cases/:id/re-evaluate', async (req, res) => {
             details: `Submission ${submission.reference || submission.id} was queued for a fresh evidence re-evaluation run.`,
         });
     });
-
-    queueSubmissionProcessing(submissionId);
 
     const updatedData = await readPlatformData();
     const updatedCase = getPrototypeCaseRecordByIdentifier(updatedData, req.params.id);
@@ -7307,6 +8943,52 @@ app.get('/api/admin/rewards/overview', requireAuth, requirePlatformAdmin, async 
     res.json(buildRewardsOverview(data));
 });
 
+// Phase 2 trigger: run the deferred advanced pass (Demucs + full forensic
+// analysis) on a v2 submission. Enriches the existing Phase 1 quick-ID report in
+// place — does NOT delete it, so the song stays even if the heavy pass re-IDs.
+// Safe to re-run (re-enriches). Demucs backend is chosen by DEMUCS_BACKEND.
+app.post('/api/admin/v2/submissions/:id/process-advanced', requireAuth, requirePlatformAdmin, async (req, res) => {
+    try {
+        const submissionId = req.params.id;
+        const data = await readPlatformData();
+        const sub = prodFindSubmission(data, submissionId);
+        if (!sub) throw new Error(`Production submission not found: ${submissionId}`);
+        queueAdvancedProcessing(submissionId);
+        res.json({ queued: true, submission_id: submissionId, demucs_backend: process.env.DEMUCS_BACKEND || 'local' });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+});
+
+// Batch Phase 2: trigger advanced processing for every submission still awaiting
+// it (status 'identified' or 'needs_advanced'). Optional ?status= filter.
+app.post('/api/admin/v2/process-advanced/batch', requireAuth, requirePlatformAdmin, async (req, res) => {
+    try {
+        const data = await readPlatformData();
+        const wanted = req.query.status
+            ? new Set(String(req.query.status).split(','))
+            : new Set(['identified', 'needs_advanced']);
+        const pending = (data.production?.submissions || []).filter((s) => wanted.has(s.status));
+        pending.forEach((s) => queueAdvancedProcessing(s.id));
+        res.json({ queued: pending.length, references: pending.map((s) => s.reference), demucs_backend: process.env.DEMUCS_BACKEND || 'local' });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+});
+
+// Back-compat alias: /reprocess now means "run advanced processing in place".
+app.post('/api/admin/v2/submissions/:id/reprocess', requireAuth, requirePlatformAdmin, async (req, res) => {
+    try {
+        const submissionId = req.params.id;
+        const data = await readPlatformData();
+        if (!prodFindSubmission(data, submissionId)) throw new Error(`Production submission not found: ${submissionId}`);
+        queueAdvancedProcessing(submissionId);
+        res.json({ queued: true, submission_id: submissionId });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+});
+
 app.post('/api/admin/reports/:id/rescore', requireAuth, requirePlatformAdmin, async (req, res) => {
     try {
         const summary = await rescoreStoredEvidence({
@@ -7337,6 +9019,28 @@ app.get('/api/admin/health/dependencies', requireAuth, requirePlatformAdmin, asy
     res.json({
         ...(await buildHealthPayload()),
         demoAccounts: process.env.NODE_ENV === 'production' ? [] : await listDemoUsers()
+    });
+});
+
+app.get('/api/admin/client-activity', requireAuth, requirePlatformAdmin, (req, res) => {
+    const clients = Array.from(connectedClients.values())
+        .sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime())
+        .map((client) => ({
+            ...client,
+            routes: Object.entries(client.routes || {})
+                .sort((a, b) => b[1] - a[1])
+                .reduce((summary, [routeFamily, count]) => {
+                    summary[routeFamily] = count;
+                    return summary;
+                }, {}),
+        }));
+
+    res.json({
+        generatedAt: new Date().toISOString(),
+        loggingEnabled: clientActivityLoggingEnabled,
+        logFile: clientActivityLoggingEnabled ? clientActivityLogFile : null,
+        clientCount: clients.length,
+        clients,
     });
 });
 
